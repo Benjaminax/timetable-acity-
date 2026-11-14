@@ -1,0 +1,9 @@
+{
+  "buildCommand": "pnpm --filter acity-timetable-vercel-demo run build",
+  "outputDirectory": "vercel-demo/.next",
+  "installCommand": "pnpm install",
+  "framework": "nextjs",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/$1" }
+  ]
+}
