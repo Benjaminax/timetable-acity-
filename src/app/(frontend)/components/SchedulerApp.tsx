@@ -74,15 +74,9 @@ function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
 const nav = [
   ['Dashboard', 'dashboard-square-01'],
   ['Timetables', 'calendar-03'],
-  ['Scheduling', 'calendar-cog'],
-  ['Classrooms', 'building-01'],
-  ['Events', 'calendar-date-1'],
-  ['Examinations', 'calendar-03'],
   ['Courses', 'book-open-01'],
-  ['Students', 'user-group'],
-  ['Lecturers', 'teacher'],
-  ['Optimisation', 'chart-line-data-01'],
-  ['Reports', 'file-chart-column'],
+  ['Classrooms', 'building-01'],
+  ['Examinations', 'calendar-03'],
   ['Settings', 'settings-01'],
 ] as const
 
@@ -648,6 +642,8 @@ const initialSettings: AppSettings = {
   dayEndTime: '18:20',
   periodDuration: 60,
   breakDuration: 10,
+  periodCount: 9,
+  includeSaturday: false,
 }
 const adminNotificationReadKey = 'acity_admin_notification_read'
 
@@ -668,7 +664,9 @@ function shiftAcademicSemester(value: string, direction: -1 | 1) {
   return `${year}/${String((year + 1) % 100).padStart(2, '0')} · Semester ${semester}`
 }
 
-const weekdayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+const defaultWeekdayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+const saturdayWeekdayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const weekdayNames = defaultWeekdayNames
 const timetablePeriodCount = TIMETABLE_PERIOD_COUNT
 const timetablePeriodStarts = TIMETABLE_PERIOD_STARTS
 const initialWeekStart = getCurrentWeekStart()
@@ -690,13 +688,14 @@ function getMondayDate(date: string) {
   return parsed.toISOString().slice(0, 10)
 }
 
-function getWeekDates(weekStart: string) {
-  return weekdayNames.map((_, index) => addCalendarDays(weekStart, index))
+function getWeekDates(weekStart: string, includeSaturday = false) {
+  const days = includeSaturday ? saturdayWeekdayNames : defaultWeekdayNames
+  return days.map((_, index) => addCalendarDays(weekStart, index))
 }
 
-function getWeekLabel(weekStart: string) {
+function getWeekLabel(weekStart: string, includeSaturday = false) {
   const start = parseCalendarDate(weekStart)
-  const end = parseCalendarDate(addCalendarDays(weekStart, 4))
+  const end = parseCalendarDate(addCalendarDays(weekStart, includeSaturday ? 5 : 4))
   const month = new Intl.DateTimeFormat('en', { month: 'long', timeZone: 'UTC' })
   const startMonth = month.format(start)
   const endMonth = month.format(end)
@@ -902,6 +901,7 @@ function Timetable({
   printTargetId,
   periodStarts = TIMETABLE_PERIOD_STARTS,
   periodDuration = 60,
+  includeSaturday = false,
 }: {
   sessions: Session[]
   onSession: (session: Session) => void
@@ -912,12 +912,14 @@ function Timetable({
   printTargetId?: string
   periodStarts?: number[]
   periodDuration?: number
+  includeSaturday?: boolean
 }) {
   const timetablePeriodStarts = periodStarts
   const timetablePeriodCount = periodStarts.length
-  const dates = getWeekDates(weekStart)
+  const daysList = includeSaturday ? saturdayWeekdayNames : defaultWeekdayNames
+  const dates = getWeekDates(weekStart, includeSaturday)
   const visibleDays =
-    dayFilter === null || dayFilter === undefined ? weekdayNames.map((_, day) => day) : [dayFilter]
+    dayFilter === null || dayFilter === undefined ? daysList.map((_, day) => day) : [dayFilter]
   return (
     <div
       className="timetable reference-timetable"
@@ -930,7 +932,7 @@ function Timetable({
         const holiday = getGhanaHoliday(dates[i])
         return (
           <div className={`day-head ${holiday ? 'holiday' : ''}`} key={dates[i]}>
-            <span>{weekdayNames[i].slice(0, 3)}</span>
+            <span>{daysList[i].slice(0, 3)}</span>
             {holiday && <small>Holiday</small>}
           </div>
         )
@@ -1050,6 +1052,8 @@ function Dashboard({
   rooms,
   settings,
   lecturerUnavailability,
+  confirmedSectionKeys = [],
+  onToggleConfirmLecturer,
 }: {
   onNavigate: (v: string) => void
   onReschedule: (session: Session) => void
@@ -1060,7 +1064,10 @@ function Dashboard({
   rooms: Room[]
   settings: AppSettings
   lecturerUnavailability: LecturerUnavailabilityByName
+  confirmedSectionKeys?: string[]
+  onToggleConfirmLecturer?: (lecturerName: string) => void
 }) {
+  const [confirmationFilter, setConfirmationFilter] = useState<'all' | 'confirmed' | 'pending'>('all')
   const issues = analyzeSchedule(sessions, rooms, lecturerUnavailability)
   const score = Math.max(0, 100 - issues.length * 12)
   const sessionsWithFindings = new Set(issues.map((issue) => getSessionKey(issue.session))).size
@@ -1098,6 +1105,30 @@ function Dashboard({
       }, new Map<string, { code: string; title: string; level: number; total: number; sections: Course[] }>())
       .values(),
   )
+
+  const lecturerConfirmationStatus = useMemo(() => {
+    return lecturers.map((lecturer) => {
+      const assignedSections = courses.filter((c) => c.lecturer === lecturer.name)
+      const sectionKeys = assignedSections.map((c) => getSectionKey(c))
+      const isConfirmed =
+        sectionKeys.length > 0 && sectionKeys.every((key) => confirmedSectionKeys.includes(key))
+      return {
+        lecturer,
+        assignedSections,
+        isConfirmed,
+        totalSections: sectionKeys.length,
+      }
+    })
+  }, [lecturers, courses, confirmedSectionKeys])
+
+  const assignedLecturersList = lecturerConfirmationStatus.filter((item) => item.totalSections > 0)
+  const confirmedLecturersCount = assignedLecturersList.filter((item) => item.isConfirmed).length
+  const totalAssignedLecturers = assignedLecturersList.length
+  const displayedLecturers = assignedLecturersList.filter((item) => {
+    if (confirmationFilter === 'confirmed') return item.isConfirmed
+    if (confirmationFilter === 'pending') return !item.isConfirmed
+    return true
+  })
   const dashboardMetrics = [
     {
       label: 'Sample students',
@@ -1320,6 +1351,103 @@ function Dashboard({
       <section className="card activity-card">
         <div className="card-head">
           <div>
+            <div className="flex items-center gap-2">
+              <h2>Lecturer Timetable Confirmations</h2>
+              <span className="rounded-full bg-[#f0f9f3] px-2.5 py-0.5 text-xs font-semibold text-[#2b7a4b] border border-[#c3e6cb]">
+                {confirmedLecturersCount} / {totalAssignedLecturers} Confirmed
+              </span>
+            </div>
+            <p>Track which lecturers have confirmed the system-generated timetable.</p>
+          </div>
+          <button className="text-button" onClick={() => onNavigate('Timetables')}>
+            Inspect full timetables <Icon name="arrow" size={15} />
+          </button>
+        </div>
+
+        <div className="mb-4">
+          <div className="flex justify-between text-xs font-medium text-[#656461] mb-1">
+            <span>Overall lecturer confirmation progress</span>
+            <span>{totalAssignedLecturers ? Math.round((confirmedLecturersCount / totalAssignedLecturers) * 100) : 0}%</span>
+          </div>
+          <div className="h-2 w-full overflow-hidden rounded-full bg-[#e9e8e5]">
+            <div
+              className="h-full bg-[#4b9b70] transition-all duration-300"
+              style={{
+                width: `${totalAssignedLecturers ? (confirmedLecturersCount / totalAssignedLecturers) * 100 : 0}%`,
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-2 mb-3">
+          {(['all', 'confirmed', 'pending'] as const).map((filter) => (
+            <button
+              key={filter}
+              className={`rounded-full px-3 py-1 text-xs font-medium border transition ${
+                confirmationFilter === filter
+                  ? 'bg-[#cc3634] text-white border-[#cc3634]'
+                  : 'bg-white text-[#656461] border-[#deddd9] hover:bg-[#f6f5f3]'
+              }`}
+              onClick={() => setConfirmationFilter(filter)}
+            >
+              {filter === 'all'
+                ? `All (${totalAssignedLecturers})`
+                : filter === 'confirmed'
+                  ? `Confirmed (${confirmedLecturersCount})`
+                  : `Pending (${totalAssignedLecturers - confirmedLecturersCount})`}
+            </button>
+          ))}
+        </div>
+
+        <div className="grid gap-2.5 md:grid-cols-2">
+          {displayedLecturers.map((item) => (
+            <div
+              key={item.lecturer.id}
+              className="flex items-center justify-between gap-3 rounded-xl border border-[#ebebe8] bg-[#fafaf8] p-3 transition hover:bg-white hover:shadow-xs"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <b className="truncate text-sm text-[#252525]">{item.lecturer.name}</b>
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                      item.isConfirmed
+                        ? 'bg-[#eef8f2] text-[#2e7d4d] border border-[#c6ebd4]'
+                        : 'bg-[#fff8ea] text-[#9a6414] border border-[#fae2b6]'
+                    }`}
+                  >
+                    {item.isConfirmed ? 'Confirmed' : 'Pending'}
+                  </span>
+                </div>
+                <p className="mt-0.5 truncate text-xs text-[#72716e]">
+                  {item.lecturer.department} · {item.assignedSections.length} course section{item.assignedSections.length === 1 ? '' : 's'}
+                </p>
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {item.assignedSections.map((sec) => (
+                    <span
+                      key={getSectionKey(sec)}
+                      className="rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-[#555] border border-[#e5e5e2]"
+                    >
+                      {sec.code}{sec.group ? ` (Grp ${sec.group})` : ''}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                <button
+                  type="button"
+                  className="rounded-lg border border-[#deddd9] bg-white px-2.5 py-1 text-xs font-semibold text-[#333] hover:bg-[#f6f5f3]"
+                  onClick={() => onToggleConfirmLecturer?.(item.lecturer.name)}
+                >
+                  {item.isConfirmed ? 'Mark pending' : 'Confirm timetable'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+      <section className="card activity-card">
+        <div className="card-head">
+          <div>
             <h2>Course enrollment</h2>
             <p>Student counts by major and class group</p>
           </div>
@@ -1395,17 +1523,23 @@ function Dashboard({
 function TimetablesPage({
   sessions,
   courses,
+  lecturers = [],
+  rooms = [],
   onReschedule,
   settings,
   lecturerUnavailability,
 }: {
   sessions: Session[]
   courses: Course[]
+  lecturers?: Lecturer[]
+  rooms?: Room[]
   onReschedule: (session: Session) => void
   settings: AppSettings
   lecturerUnavailability: LecturerUnavailabilityByName
 }) {
-  const [query, setQuery] = useState('')
+  const [timetableMode, setTimetableMode] = useState<'programme' | 'lecturer' | 'classroom'>('programme')
+  const [selectedLecturer, setSelectedLecturer] = useState<string>(lecturers[0]?.name ?? 'Ama Boateng')
+  const [selectedClassroom, setSelectedClassroom] = useState<string>(rooms[0]?.name ?? 'Computer Lab 1')
   const [programme, setProgramme] = useState(
     undergraduateProgrammes.find((item) =>
       courses.some(
@@ -1418,8 +1552,6 @@ function TimetablesPage({
     settings.semester.includes('Semester 2') ? 'January' : 'September',
   )
   const [intake, setIntake] = useState<'All cohorts' | 'September' | 'January'>('All cohorts')
-  const [view, setView] = useState<'Day' | 'Week' | 'Semester'>('Week')
-  const [selectedDay, setSelectedDay] = useState(0)
   const [weekStart, setWeekStart] = useState(initialWeekStart)
   const [exportingPng, setExportingPng] = useState(false)
   const [exportError, setExportError] = useState('')
@@ -1438,32 +1570,54 @@ function TimetablesPage({
       course.academicPeriod === academicPeriod &&
       (intake === 'All cohorts' || course.intake === intake || course.intake === 'Merged'),
   )
-  const filtered = sessions.filter((session) => {
-    const matchesText = `${session.code} ${session.title} ${session.room} ${session.lecturer}`
-      .toLowerCase()
-      .includes(query.toLowerCase())
-    return (
-      matchesText &&
-      session.studentVisible !== false &&
-      (session.programmes?.includes(selectedProgramme?.major ?? '') ||
-        session.major === selectedProgramme?.major) &&
-      session.level === Number(level) &&
-      session.academicPeriod === academicPeriod &&
-      (intake === 'All cohorts' || session.intake === intake || session.intake === 'Merged')
-    )
-  })
+  const filtered = useMemo(() => {
+    if (timetableMode === 'lecturer') {
+      return sessions.filter(
+        (session) => session.lecturer === selectedLecturer && session.studentVisible !== false,
+      )
+    }
+    if (timetableMode === 'classroom') {
+      return sessions.filter(
+        (session) => session.room === selectedClassroom && session.studentVisible !== false,
+      )
+    }
+    return sessions.filter((session) => {
+      return (
+        session.studentVisible !== false &&
+        (session.programmes?.includes(selectedProgramme?.major ?? '') ||
+          session.major === selectedProgramme?.major) &&
+        session.level === Number(level) &&
+        session.academicPeriod === academicPeriod &&
+        (intake === 'All cohorts' || session.intake === intake || session.intake === 'Merged')
+      )
+    })
+  }, [
+    timetableMode,
+    selectedLecturer,
+    selectedClassroom,
+    sessions,
+    selectedProgramme,
+    level,
+    academicPeriod,
+    intake,
+  ])
+
   const unscheduledCourses = matchingCourses.filter((course) => course.status === 'Draft')
-  const emptyScheduleMessage = matchingCourses.length
-    ? `No scheduled classes match these filters. ${unscheduledCourses.length ? `${unscheduledCourses.map((course) => course.code).join(', ')} ${unscheduledCourses.length === 1 ? 'is' : 'are'} marked Not scheduled in the sample catalogue.` : `${matchingCourses.length} matching course${matchingCourses.length === 1 ? ' is' : 's are'} listed in the sample catalogue.`}`
-    : 'No course or timetable records are available for this programme and level in the sample data. The university website does not publish a course-by-level timetable.'
   const timetablePeriods = useMemo(() => {
     return calculateTimetablePeriods(
       settings.dayStartTime || '08:00',
       settings.periodDuration || 60,
       settings.breakDuration !== undefined ? settings.breakDuration : 10,
       settings.dayEndTime || '18:20',
+      settings.periodCount || 9,
     )
-  }, [settings.dayStartTime, settings.periodDuration, settings.breakDuration, settings.dayEndTime])
+  }, [
+    settings.dayStartTime,
+    settings.periodDuration,
+    settings.breakDuration,
+    settings.dayEndTime,
+    settings.periodCount,
+  ])
 
   const timetableRef = useRef<HTMLDivElement>(null)
   const exportPng = async () => {
@@ -1489,11 +1643,19 @@ function TimetablesPage({
       <section className="page-heading">
         <div>
           <p className="eyebrow">Academic operations</p>
-          <h1>Programme timetable</h1>
+          <h1>
+            {timetableMode === 'lecturer'
+              ? `Lecturer timetable · ${selectedLecturer}`
+              : timetableMode === 'classroom'
+                ? `Classroom timetable · ${selectedClassroom}`
+                : 'Programme timetable'}
+          </h1>
           <p>
-            {programme} · Level {level} · {academicPeriod} term
-            {Number(level) === 100 && intake !== 'All cohorts' ? ` · ${intake} intake` : ''}. Choose
-            a programme, level, term, and intake to view another cohort.
+            {timetableMode === 'lecturer'
+              ? `Viewing scheduled classes for ${selectedLecturer}. Select any class to reschedule or change details.`
+              : timetableMode === 'classroom'
+                ? `Viewing scheduled classes in ${selectedClassroom}. Select any class to relocate or reschedule.`
+                : `${programme} · Level ${level} · ${academicPeriod} term${Number(level) === 100 && intake !== 'All cohorts' ? ` · ${intake} intake` : ''}. Select any class to edit.`}
           </p>
         </div>
         <div className="timetable-actions">
@@ -1546,85 +1708,98 @@ function TimetablesPage({
         </p>
       )}
       <div className="toolbar card timetable-filter-toolbar">
-        <div className="segmented">
-          {(['Day', 'Week', 'Semester'] as const).map((item) => (
-            <button
-              key={item}
-              className={view === item ? 'active' : ''}
-              onClick={() => setView(item)}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-        <label className="field-search">
-          <Icon name="search" />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search course, room or lecturer"
-          />
-        </label>
         <select
-          className="timetable-programme-filter"
-          aria-label="Filter timetable by programme or major"
-          value={programme}
-          onChange={(event) => setProgramme(event.target.value)}
-        >
-          {availableProgrammes.map((item) => (
-            <option key={item.label}>{item.label}</option>
-          ))}
-        </select>
-        <select
-          className="timetable-level-filter"
-          aria-label="Filter timetable by level"
-          value={level}
-          onChange={(event) => setLevel(event.target.value)}
-        >
-          {[100, 200, 300, 400].map((item) => (
-            <option key={item} value={item}>
-              Level {item}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="Filter timetable by academic period"
-          value={academicPeriod}
+          className="timetable-mode-filter font-semibold text-[#a42d2b]"
+          aria-label="Select timetable view mode"
+          value={timetableMode}
           onChange={(event) =>
-            setAcademicPeriod(event.target.value as 'September' | 'January' | 'Summer')
+            setTimetableMode(event.target.value as 'programme' | 'lecturer' | 'classroom')
           }
         >
-          {(['September', 'January', 'Summer'] as const).map((period) => (
-            <option key={period} value={period}>
-              {period} term
-            </option>
-          ))}
+          <option value="programme">Programme Timetable</option>
+          <option value="lecturer">Lecturer Timetable (Edit Teacher Schedule)</option>
+          <option value="classroom">Classroom Timetable</option>
         </select>
-        {Number(level) === 100 && (
+
+        {timetableMode === 'lecturer' && (
           <select
-            aria-label="Filter Level 100 timetable by intake"
-            value={intake}
-            onChange={(event) =>
-              setIntake(event.target.value as 'All cohorts' | 'September' | 'January')
-            }
+            aria-label="Filter timetable by lecturer"
+            value={selectedLecturer}
+            onChange={(event) => setSelectedLecturer(event.target.value)}
           >
-            {(['All cohorts', 'September', 'January'] as const).map((cohortIntake) => (
-              <option key={cohortIntake}>{cohortIntake}</option>
-            ))}
-          </select>
-        )}
-        {view === 'Day' && (
-          <select
-            aria-label="Choose timetable day"
-            value={selectedDay}
-            onChange={(event) => setSelectedDay(Number(event.target.value))}
-          >
-            {weekdayNames.map((day, index) => (
-              <option key={day} value={index}>
-                {day}
+            {lecturers.map((lecturer) => (
+              <option key={lecturer.id} value={lecturer.name}>
+                {lecturer.name} ({lecturer.department})
               </option>
             ))}
           </select>
+        )}
+
+        {timetableMode === 'classroom' && (
+          <select
+            aria-label="Filter timetable by classroom"
+            value={selectedClassroom}
+            onChange={(event) => setSelectedClassroom(event.target.value)}
+          >
+            {rooms.map((room) => (
+              <option key={room.name} value={room.name}>
+                {room.name} ({room.capacity} seats · {room.type})
+              </option>
+            ))}
+          </select>
+        )}
+
+        {timetableMode === 'programme' && (
+          <>
+            <select
+              className="timetable-programme-filter"
+              aria-label="Filter timetable by programme or major"
+              value={programme}
+              onChange={(event) => setProgramme(event.target.value)}
+            >
+              {availableProgrammes.map((item) => (
+                <option key={item.label}>{item.label}</option>
+              ))}
+            </select>
+            <select
+              className="timetable-level-filter"
+              aria-label="Filter timetable by level"
+              value={level}
+              onChange={(event) => setLevel(event.target.value)}
+            >
+              {[100, 200, 300, 400].map((item) => (
+                <option key={item} value={item}>
+                  Level {item}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Filter timetable by academic period"
+              value={academicPeriod}
+              onChange={(event) =>
+                setAcademicPeriod(event.target.value as 'September' | 'January' | 'Summer')
+              }
+            >
+              {(['September', 'January', 'Summer'] as const).map((period) => (
+                <option key={period} value={period}>
+                  {period} term
+                </option>
+              ))}
+            </select>
+            {Number(level) === 100 && (
+              <select
+                aria-label="Filter Level 100 timetable by intake"
+                value={intake}
+                onChange={(event) =>
+                  setIntake(event.target.value as 'All cohorts' | 'September' | 'January')
+                }
+              >
+                {(['All cohorts', 'September', 'January'] as const).map((cohortIntake) => (
+                  <option key={cohortIntake}>{cohortIntake}</option>
+                ))}
+              </select>
+            )}
+          </>
         )}
       </div>
       <section className="card calendar-large">
@@ -1637,7 +1812,7 @@ function TimetablesPage({
             ‹
           </button>
           <div>
-            <h2>{view === 'Day' ? formatDate(selectedDay, weekStart) : getWeekLabel(weekStart)}</h2>
+            <h2>{getWeekLabel(weekStart, settings.includeSaturday)}</h2>
             <p>
               {academicPeriod} term · {settings.semester}
             </p>
@@ -1661,13 +1836,11 @@ function TimetablesPage({
             />
           </label>
           <span />
-          {view !== 'Semester' && (
-            <div className="legend">
-              <i className="lecture" /> Lecture <i className="tutorial" /> Tutorial{' '}
-              <i className="practical" /> Practical
-              <i className="lecturer-unavailable-legend" /> Lecturer unavailable
-            </div>
-          )}
+          <div className="legend">
+            <i className="lecture" /> Lecture <i className="tutorial" /> Tutorial{' '}
+            <i className="practical" /> Practical
+            <i className="lecturer-unavailable-legend" /> Lecturer unavailable
+          </div>
         </div>
         <div
           ref={timetableRef}
@@ -1684,47 +1857,18 @@ function TimetablesPage({
             printTargetId="system-timetable"
             periodStarts={timetablePeriods}
             periodDuration={settings.periodDuration || 60}
+            includeSaturday={settings.includeSaturday}
           />
         </div>
-        {filtered.length === 0 ? (
-          <div className="workspace-empty">{emptyScheduleMessage}</div>
-        ) : view === 'Semester' ? (
-          <div className="workspace-table-scroll screen-only-timetable">
-            <table className="workspace-table">
-              <thead>
-                <tr>
-                  <th>Course</th>
-                  <th>Major & level</th>
-                  <th>Lecturer</th>
-                  <th>Weekly pattern</th>
-                  <th>Room</th>
-                  <th>Enrollment</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((session) => (
-                  <tr key={getSessionKey(session)}>
-                    <td>
-                      <b>{session.code}</b>
-                      <span>{session.title}</span>
-                    </td>
-                    <td>
-                      {session.major}
-                      <small>Level {session.level}</small>
-                    </td>
-                    <td>{session.lecturer}</td>
-                    <td>
-                      {weekdayNames[session.day]} · {formatTime(session.start)}–
-                      {formatTime(getSessionEnd(session))}
-                    </td>
-                    <td>{session.room}</td>
-                    <td>{session.enrollment}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {filtered.length === 0 && (
+          <div className="workspace-empty">
+            {timetableMode === 'lecturer'
+              ? `No classes are scheduled for ${selectedLecturer}.`
+              : timetableMode === 'classroom'
+                ? `No classes are scheduled in ${selectedClassroom}.`
+                : 'No course or timetable records match these filters.'}
           </div>
-        ) : null}
+        )}
         <div className="calendar-footnote">
           Sample timetable allocations · Programme names from{' '}
           <a href="https://acity.edu.gh/undergraduate/" target="_blank" rel="noreferrer">
@@ -1758,6 +1902,7 @@ function ClassroomsPage({
   rooms,
   onAddRoom,
   onRemoveRoom,
+  onBookRoom,
 }: {
   sessions: Session[]
   settings: AppSettings
@@ -1768,11 +1913,20 @@ function ClassroomsPage({
   rooms: Room[]
   onAddRoom: (room: Room) => void
   onRemoveRoom: (roomName: string) => void
+  onBookRoom?: (booking: {
+    room: string
+    title: string
+    day: number
+    start: number
+    duration: number
+    organizer: string
+  }) => { relocatedCount: number; notice: string } | void
 }) {
   const [query, setQuery] = useState('')
   const [type, setType] = useState('All types')
   const [availability, setAvailability] = useState('All availability')
   const [showAddRoom, setShowAddRoom] = useState(false)
+  const [showBookRoom, setShowBookRoom] = useState(false)
   const [roomNotice, setRoomNotice] = useState('')
   const activePeriod = getAcademicPeriodForSemester(settings.semester)
   const activePeriodSessions = sessions.filter((session) =>
@@ -1839,10 +1993,120 @@ function ClassroomsPage({
           <h1>Classrooms</h1>
           <p>Review room capacity, weekly bookings and safe rescheduling options.</p>
         </div>
-        <Button onClick={() => setShowAddRoom((open) => !open)}>
-          <Icon name="plus" size={16} /> Add classroom
-        </Button>
+        <div className="flex gap-2">
+          <Button kind="secondary" onClick={() => setShowBookRoom((open) => !open)}>
+            <Icon name="calendar" size={16} /> Book room / event
+          </Button>
+          <Button onClick={() => setShowAddRoom((open) => !open)}>
+            <Icon name="plus" size={16} /> Add classroom
+          </Button>
+        </div>
       </section>
+      {showBookRoom && (
+        <form
+          className="card workspace-form"
+          onSubmit={(e) => {
+            e.preventDefault()
+            const data = new FormData(e.currentTarget)
+            const targetRoom = String(data.get('room'))
+            const title = String(data.get('title'))
+            const day = Number(data.get('day'))
+            const timeStr = String(data.get('startTime'))
+            const duration = Number(data.get('duration'))
+            const [h, m] = timeStr.split(':').map(Number)
+            const start = h * 60 + m
+            const result = onBookRoom?.({
+              room: targetRoom,
+              title,
+              day,
+              start,
+              duration,
+              organizer: String(data.get('organizer')),
+            })
+            setRoomNotice(
+              result?.notice ||
+                `Room ${targetRoom} booked for "${title}". Conflicting classes were automatically relocated. Lecturers can move their classes if needed.`,
+            )
+            setShowBookRoom(false)
+          }}
+        >
+          <div className="card-head">
+            <div>
+              <h2>Book a Classroom</h2>
+              <p>
+                Reserve a room for a special campus event, presentation or meeting. If classes are
+                already scheduled, the system will automatically relocate them to available
+                alternative rooms, and lecturers can move them if they prefer.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => setShowBookRoom(false)}
+            >
+              ×
+            </button>
+          </div>
+          <div className="workspace-form-grid">
+            <label>
+              Classroom
+              <select name="room" defaultValue={selectedRoom}>
+                {rooms.map((r) => (
+                  <option key={r.name} value={r.name}>
+                    {r.name} ({r.capacity} seats · {r.type})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Event / Session Title
+              <input name="title" required placeholder="e.g. Industry Guest Lecture / Tech Seminar" />
+            </label>
+            <label>
+              Organizer / Faculty
+              <input name="organizer" required placeholder="e.g. Dr. K. Mensah / Career Services" />
+            </label>
+            <label>
+              Day of Week
+              <select name="day" defaultValue={0}>
+                {(settings.includeSaturday
+                  ? ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+                  : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+                ).map((d, idx) => (
+                  <option key={d} value={idx}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Start Time
+              <input name="startTime" type="time" defaultValue="10:00" required />
+            </label>
+            <label>
+              Duration
+              <select name="duration" defaultValue={120}>
+                <option value={60}>1 hour (60 min)</option>
+                <option value={90}>1.5 hours (90 min)</option>
+                <option value={120}>2 hours (120 min)</option>
+                <option value={180}>3 hours (180 min)</option>
+              </select>
+            </label>
+          </div>
+          <div className="workspace-form-actions">
+            <button
+              type="button"
+              className="button secondary"
+              onClick={() => setShowBookRoom(false)}
+            >
+              Cancel
+            </button>
+            <button className="button primary" type="submit">
+              Confirm Room Booking & Relocate Conflicts
+            </button>
+          </div>
+        </form>
+      )}
       <div className="metrics compact">
         {[
           [String(rooms.length), 'Sample rooms', 'building'],
@@ -2044,6 +2308,7 @@ function ClassroomsPage({
             onSession={onReschedule}
             lecturerUnavailability={lecturerUnavailability}
             roomFilter={selectedRoom}
+            includeSaturday={settings.includeSaturday}
           />
         </div>
       </section>
@@ -2114,7 +2379,6 @@ export default function App({
     0,
     nav.findIndex(([label]) => label === page),
   )
-  const adminNavigationRef = useRef<HTMLDivElement | null>(null)
   const notificationWrapRef = useRef<HTMLDivElement | null>(null)
   const [sessions, setSessions] = useState(initialTeachingAssignments.sessions)
   const [weekOverrides, setWeekOverrides] = useState<Record<string, Session>>({})
@@ -2163,14 +2427,7 @@ export default function App({
     window.addEventListener('storage', handleStorage)
     return () => window.removeEventListener('storage', handleStorage)
   }, [])
-  useEffect(() => {
-    if (role !== 'admin') return
-    const navigation = adminNavigationRef.current
-    const activeButton = navigation?.querySelector<HTMLButtonElement>('[aria-current="page"]')
-    if (navigation && activeButton) {
-      navigation.scrollTo({ left: activeButton.offsetLeft, behavior: 'smooth' })
-    }
-  }, [page, role])
+  // Nav scroll removed - fixed nav with labels
   useEffect(() => {
     if (!notificationsOpen) return
 
@@ -2441,6 +2698,22 @@ export default function App({
           rooms={rooms}
           settings={settings}
           lecturerUnavailability={lecturerUnavailability}
+          confirmedSectionKeys={confirmedSectionKeys}
+          onToggleConfirmLecturer={(lecturerName) => {
+            const lecturerSections = courses
+              .filter((c) => c.lecturer === lecturerName)
+              .map((c) => getSectionKey(c))
+            setConfirmedSectionKeys((current) => {
+              const allConfirmed =
+                lecturerSections.length > 0 &&
+                lecturerSections.every((k) => current.includes(k))
+              if (allConfirmed) {
+                return current.filter((k) => !lecturerSections.includes(k))
+              } else {
+                return Array.from(new Set([...current, ...lecturerSections]))
+              }
+            })
+          }}
           onNavigate={navigateToPage}
           onReschedule={openReschedule}
         />
@@ -2450,6 +2723,8 @@ export default function App({
         <TimetablesPage
           sessions={effectiveSessions}
           courses={courses}
+          lecturers={lecturers}
+          rooms={rooms}
           onReschedule={openReschedule}
           settings={settings}
           lecturerUnavailability={lecturerUnavailability}
@@ -2470,6 +2745,50 @@ export default function App({
             setRooms((current) => current.filter((room) => room.name !== roomName))
             if (selectedRoom === roomName) {
               setSelectedRoom(rooms.find((room) => room.name !== roomName)?.name ?? '')
+            }
+          }}
+          onBookRoom={(booking) => {
+            const conflicting = effectiveSessions.filter(
+              (s) =>
+                s.room === booking.room &&
+                s.day === booking.day &&
+                Math.max(s.start, booking.start) <
+                  Math.min(s.start + s.duration, booking.start + booking.duration),
+            )
+            let relocated = 0
+            for (const conflict of conflicting) {
+              const altRoom = rooms.find(
+                (r) =>
+                  r.name !== booking.room &&
+                  isRoomTypeCompatibleWithSession(conflict, r) &&
+                  r.capacity >= conflict.enrollment &&
+                  !effectiveSessions.some(
+                    (other) =>
+                      other.room === r.name &&
+                      other.day === conflict.day &&
+                      Math.max(other.start, conflict.start) <
+                        Math.min(other.start + other.duration, conflict.start + conflict.duration),
+                  ),
+              )
+              if (altRoom) {
+                confirmMove({ ...conflict, room: altRoom.name })
+                notifyAdmin(
+                  `System automatically relocated ${conflict.code} from ${booking.room} to ${altRoom.name} due to booking "${booking.title}". Lecturer can reschedule if needed.`,
+                )
+                relocated++
+              }
+            }
+            bookCampusEvent({
+              title: booking.title,
+              room: booking.room,
+              date: addCalendarDays(initialWeekStart, booking.day),
+              start: booking.start,
+              duration: booking.duration,
+              audience: booking.organizer || 'Academic City Community',
+            })
+            return {
+              relocatedCount: relocated,
+              notice: `Room ${booking.room} booked for "${booking.title}". ${relocated ? `${relocated} class was automatically relocated to an alternative room.` : 'No class conflicts found.'}`,
             }
           }}
         />
@@ -2509,6 +2828,19 @@ export default function App({
           lecturers={lecturers}
           sessions={effectiveSessions}
           onAdd={(course) => setCourses((current) => [...current, course])}
+          onAssignLecturer={(course, lecturerName) => {
+            const targetKey = getSectionKey(course)
+            setCourses((current) =>
+              current.map((c) =>
+                getSectionKey(c) === targetKey ? { ...c, lecturer: lecturerName } : c,
+              ),
+            )
+            setSessions((current) =>
+              current.map((s) =>
+                getSectionKey(s) === targetKey ? { ...s, lecturer: lecturerName } : s,
+              ),
+            )
+          }}
           onUpdatePattern={updateCourseMeetingPattern}
           onSplit={(course, groupAEnrollment, groupALecturer, groupBEnrollment, groupBLecturer) => {
             const existingKey = getSectionKey(course)
@@ -2890,26 +3222,32 @@ export default function App({
         </main>
         {role === 'admin' && (
           <nav className="bottom-navigation admin-bottom-nav" aria-label="Administrator navigation">
-            <div className="admin-nav-scroll" ref={adminNavigationRef}>
-              <div className="bottom-nav-track admin-bottom-nav-track">
-                {page !== 'Notifications' && (
-                  <span
-                    className="bottom-nav-indicator"
-                    aria-hidden="true"
-                    style={{ transform: `translateX(${activeNavigationIndex * 52}px)` }}
-                  />
-                )}
-                {nav.map(([label, icon]) => (
-                  <button
-                    className={page === label ? 'active' : ''}
-                    aria-label={label}
-                    aria-current={page === label ? 'page' : undefined}
-                    title={label}
-                    onClick={() => navigateToPage(label)}
-                    key={label}
-                  >
-                    <i className={`hgi hgi-stroke hgi-${icon}`} aria-hidden="true" />
-                    {label === 'Optimisation' && (
+            <div className="admin-nav-fixed">
+              {page !== 'Notifications' && (
+                <span
+                  className="bottom-nav-indicator"
+                  aria-hidden="true"
+                  style={{ transform: `translateX(${activeNavigationIndex * (100 / nav.length)}%)`, width: `${100 / nav.length}%` }}
+                />
+              )}
+              {nav.map(([label, icon]) => (
+                <button
+                  className={`admin-nav-item${page === label ? ' active' : ''}`}
+                  aria-label={label}
+                  aria-current={page === label ? 'page' : undefined}
+                  title={label}
+                  onClick={() => navigateToPage(label)}
+                  key={label}
+                >
+                  <i className={`hgi hgi-stroke hgi-${icon}`} aria-hidden="true" />
+                  <span>{label}</span>
+                  {label === 'Courses' && (
+                    courses.filter(
+                      (course) =>
+                        !sessions.some(
+                          (session) => getSectionKey(session) === getSectionKey(course),
+                        ),
+                    ).length > 0 && (
                       <em>
                         {
                           courses.filter(
@@ -2920,10 +3258,10 @@ export default function App({
                           ).length
                         }
                       </em>
-                    )}
-                  </button>
-                ))}
-              </div>
+                    )
+                  )}
+                </button>
+              ))}
             </div>
             <button
               className="admin-nav-logout"

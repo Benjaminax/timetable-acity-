@@ -60,6 +60,7 @@ export function AdminTimetable({
   showDates = false,
   periodStarts = TIMETABLE_PERIOD_STARTS,
   periodDuration = 60,
+  includeSaturday = false,
 }: {
   sessions: Session[]
   onSession?: (session: Session) => void
@@ -70,17 +71,25 @@ export function AdminTimetable({
   showDates?: boolean
   periodStarts?: number[]
   periodDuration?: number
+  includeSaturday?: boolean
 }) {
+  const weekdayNames = useMemo(
+    () =>
+      includeSaturday
+        ? ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+        : ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+    [includeSaturday],
+  )
   const timetablePeriodCount = periodStarts.length
   const timetablePeriodStarts = periodStarts
   const dates = useMemo(() => {
     return weekdayNames.map((_, index) => addCalendarDays(weekStart, index))
-  }, [weekStart])
+  }, [weekStart, weekdayNames])
 
   return (
     <div
       className="timetable reference-timetable"
-      style={{ gridTemplateColumns: '6% repeat(5, minmax(0, 1fr))' }}
+      style={{ gridTemplateColumns: `6% repeat(${weekdayNames.length}, minmax(0, 1fr))` }}
     >
       <div className="day-head time-head">Time</div>
       {weekdayNames.map((day, i) => {

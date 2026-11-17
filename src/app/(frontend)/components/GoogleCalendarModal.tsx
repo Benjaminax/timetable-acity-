@@ -170,7 +170,7 @@ export function GoogleCalendarModal({
             }}
             aria-label="Close dialog"
           >
-            ✕
+            &times;
           </button>
         </div>
 

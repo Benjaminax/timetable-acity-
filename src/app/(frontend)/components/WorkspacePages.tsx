@@ -263,6 +263,7 @@ export function CoursesPage({
   lecturers,
   sessions,
   onAdd,
+  onAssignLecturer,
   onUpdatePattern,
   onSplit,
   onNavigate,
@@ -271,6 +272,7 @@ export function CoursesPage({
   lecturers: Lecturer[]
   sessions: Session[]
   onAdd: (course: Course) => void
+  onAssignLecturer?: (course: Course, lecturerName: string) => void
   onUpdatePattern: (
     course: Course,
     pattern: CourseMeetingPattern,
@@ -285,6 +287,7 @@ export function CoursesPage({
   ) => boolean
   onNavigate: (page: string) => void
 }) {
+  const [activeTab, setActiveTab] = useState<'sections' | 'catalogue'>('sections')
   const [query, setQuery] = useState('')
   const [major, setMajor] = useState('All majors')
   const [showForm, setShowForm] = useState(false)
@@ -296,30 +299,115 @@ export function CoursesPage({
     meetingsPerWeek: number
   } | null>(null)
   const [notice, setNotice] = useState('')
+  const [newCourseCode, setNewCourseCode] = useState('')
+  const [newCourseTitle, setNewCourseTitle] = useState('')
+  const [newCourseMajor, setNewCourseMajor] = useState('Computer Science')
   const [newCourseLevel, setNewCourseLevel] = useState(200)
   const [newSessionType, setNewSessionType] = useState('Lecture')
+  const [newCourseLecturer, setNewCourseLecturer] = useState('')
+  const [newDurationOption, setNewDurationOption] = useState<'4hours' | '3hours' | '2hours' | '1hour'>('4hours')
+  const [newPrerequisite, setNewPrerequisite] = useState('')
   const [newIsTechnical, setNewIsTechnical] = useState(false)
   const [newSessionDuration, setNewSessionDuration] = useState(120)
   const [newMeetingsPerWeek, setNewMeetingsPerWeek] = useState(2)
-  const isNewTechnical = newIsTechnical || newSessionType === 'Practical'
+
+  const [sameLecturerForBothGroups, setSameLecturerForBothGroups] = useState(true)
+  const [splitLecturerA, setSplitLecturerA] = useState('')
+  const [splitLecturerB, setSplitLecturerB] = useState('')
+  const [editingExamCourseKey, setEditingExamCourseKey] = useState<string | null>(null)
+  const [courseExams, setCourseExams] = useState<
+    Record<
+      string,
+      {
+        questions: string
+        date: string
+        time: string
+        venue: string
+        totalMarks: number
+      }
+    >
+  >({
+    'CS 201::Computer Science::200::all': {
+      questions:
+        'Question 1 (30 marks): Implement a balanced AVL tree insertion algorithm.\nQuestion 2 (35 marks): Analyze Dijkstra shortest-path algorithm complexity with adjacency matrix vs adjacency list.\nQuestion 3 (35 marks): Design a hash table collision resolution mechanism using Robin Hood hashing.',
+      date: '2026-12-16',
+      time: '09:00 - 12:00',
+      venue: 'Great Hall',
+      totalMarks: 100,
+    },
+    'CS 301::Computer Science::300::all': {
+      questions:
+        'Question 1 (40 marks): Compare ACID properties with BASE in distributed data stores.\nQuestion 2 (30 marks): Write normalized 3NF schemas for an academic course reservation system.\nQuestion 3 (30 marks): Construct execution plan for query optimization using B-tree indexing.',
+      date: '2026-12-18',
+      time: '13:00 - 16:00',
+      venue: 'Engineering Lab 102',
+      totalMarks: 100,
+    },
+  })
+
+  const isNewTechnical = newIsTechnical || newDurationOption === '4hours' || newSessionType === 'Practical'
   const majors = [...new Set(courses.map((course) => course.major))]
+
+  const suggestedLecturers = useMemo(() => {
+    const titleLower = newCourseTitle.toLowerCase()
+    const majorLower = newCourseMajor.toLowerCase()
+    return lecturers.filter((lecturer) => {
+      const pastSessions = sessions.filter((s) => s.lecturer === lecturer.name)
+      const pastCourses = courses.filter((c) => c.lecturer === lecturer.name)
+      const taughtSimilar = [...pastSessions, ...pastCourses].some((item) => {
+        const itemTitle = item.title.toLowerCase()
+        const itemMajor = item.major.toLowerCase()
+        return (
+          itemMajor.includes(majorLower) ||
+          (titleLower.length >= 3 &&
+            (itemTitle.includes(titleLower.slice(0, 4)) || titleLower.includes(itemTitle.slice(0, 4))))
+        )
+      })
+      const deptMatch = lecturer.department?.toLowerCase().includes(majorLower)
+      return taughtSimilar || deptMatch
+    }).slice(0, 4)
+  }, [newCourseTitle, newCourseMajor, lecturers, sessions, courses])
+
   const filtered = courses.filter((course) => {
     const matchesText = `${course.code} ${course.title} ${course.lecturer}`
       .toLowerCase()
       .includes(query.toLowerCase())
     return matchesText && (major === 'All majors' || course.major === major)
   })
+
   const addCourse = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const data = new FormData(event.currentTarget)
     const selectedGroup = String(data.get('group'))
     const level = Number(data.get('level'))
-    const sessionDuration = Number(data.get('sessionDuration'))
-    const meetingsPerWeek = Number(data.get('meetingsPerWeek'))
-    const code = String(data.get('code')).trim().toUpperCase()
-    const title = String(data.get('title')).trim()
+    const code = (newCourseCode || String(data.get('code'))).trim().toUpperCase()
+    const title = (newCourseTitle || String(data.get('title'))).trim()
+    const majorSelected = newCourseMajor || String(data.get('major'))
+    const assignedLecturer = (newCourseLecturer || String(data.get('lecturer'))).trim() || 'Unassigned'
     const sessionType = String(data.get('sessionType'))
-    const isTechnical = data.get('isTechnical') === 'on' || sessionType === 'Practical'
+
+    let sessionDuration = 120
+    let meetingsPerWeek = 2
+    let isTechnical = false
+
+    if (newDurationOption === '4hours') {
+      sessionDuration = 120
+      meetingsPerWeek = 2
+      isTechnical = true
+    } else if (newDurationOption === '3hours') {
+      sessionDuration = 180
+      meetingsPerWeek = 1
+      isTechnical = false
+    } else if (newDurationOption === '2hours') {
+      sessionDuration = 120
+      meetingsPerWeek = 1
+      isTechnical = false
+    } else {
+      sessionDuration = 60
+      meetingsPerWeek = 1
+      isTechnical = false
+    }
+
     const patternError = getCourseMeetingPatternError(
       { code, title, level, sessionType, isTechnical },
       sessionDuration,
@@ -332,10 +420,10 @@ export function CoursesPage({
     const course: Course = {
       code,
       title,
-      major: String(data.get('major')),
+      major: majorSelected,
       level,
       enrollment: Number(data.get('enrollment')),
-      lecturer: String(data.get('lecturer')).trim() || 'Unassigned',
+      lecturer: assignedLecturer,
       sessionType,
       credits: Number(data.get('credits')),
       status: 'Draft',
@@ -344,6 +432,8 @@ export function CoursesPage({
       sessionDuration,
       meetingsPerWeek,
       weeklyHours: (sessionDuration / 60) * meetingsPerWeek,
+      prerequisites: newPrerequisite.trim() ? [newPrerequisite.trim().toUpperCase()] : undefined,
+      passedPrerequisites: true,
     }
     if (courses.some((existing) => getSectionKey(existing) === getSectionKey(course))) {
       setNotice(
@@ -352,9 +442,15 @@ export function CoursesPage({
       return
     }
     onAdd(course)
-    setNotice(`${course.code} added as a draft course.`)
+    setNotice(
+      `${course.code} added as a draft course (${newDurationOption === '4hours' ? '4 hours: 2h on 2 different days' : newDurationOption === '3hours' ? '3 hours: continuous block' : `${sessionDuration / 60}h session`}).`,
+    )
     setShowForm(false)
     event.currentTarget.reset()
+    setNewCourseCode('')
+    setNewCourseTitle('')
+    setNewCourseLecturer('')
+    setNewPrerequisite('')
     setNewCourseLevel(200)
     setNewSessionType('Lecture')
     setNewIsTechnical(false)
@@ -363,6 +459,8 @@ export function CoursesPage({
   }
   const splittingCourse = courses.find((course) => getSectionKey(course) === splittingCourseKey)
   const editingPatternCourse = courses.find((course) => getSectionKey(course) === editingPatternKey)
+  const editingExamCourse = courses.find((course) => getSectionKey(course) === editingExamCourseKey)
+  const currentExamData = editingExamCourseKey ? courseExams[editingExamCourseKey] : null
   const startEditingPattern = (course: Course) => {
     const defaults = getDefaultCourseMeetingPattern(course)
     setEditingPatternKey(getSectionKey(course))
@@ -471,19 +569,53 @@ export function CoursesPage({
           <div className="workspace-form-grid">
             <label>
               Course code
-              <input name="code" required placeholder="e.g. CS 410" />
+              <input
+                name="code"
+                required
+                placeholder="e.g. CS 410"
+                value={newCourseCode}
+                onChange={(e) => setNewCourseCode(e.target.value)}
+              />
             </label>
             <label>
               Course title
-              <input name="title" required placeholder="Course title" />
+              <input
+                name="title"
+                required
+                placeholder="e.g. Cloud Computing Systems"
+                value={newCourseTitle}
+                onChange={(e) => setNewCourseTitle(e.target.value)}
+              />
             </label>
             <label>
               Major
-              <select name="major" required>
+              <select
+                name="major"
+                required
+                value={newCourseMajor}
+                onChange={(e) => setNewCourseMajor(e.target.value)}
+              >
                 {majors.map((item) => (
                   <option key={item}>{item}</option>
                 ))}
               </select>
+            </label>
+            <label>
+              Level
+              <select
+                name="level"
+                value={newCourseLevel}
+                onChange={(event) => setNewCourseLevel(Number(event.target.value))}
+              >
+                {[100, 200, 300, 400].map((lvl) => (
+                  <option key={lvl}>{lvl}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Expected enrollment
+              <input name="enrollment" type="number" min="1" defaultValue="45" required />
+              <small>If above 60–70, the system will recommend splitting into Group A &amp; B.</small>
             </label>
             <label>
               Class group (optional)
@@ -492,118 +624,86 @@ export function CoursesPage({
                 <option value="A">Group A</option>
                 <option value="B">Group B</option>
               </select>
-              <small>
-                Use A/B only for a course that is intentionally split into separate classes.
-              </small>
+              <small>Note: Timetabling policy allows only Group A and B; Group C is disallowed.</small>
             </label>
-            <label>
-              Level
+            <label className="col-span-full">
+              Proposed lecturer
               <select
-                name="level"
-                value={newCourseLevel}
-                onChange={(event) => {
-                  const level = Number(event.target.value)
-                  setNewCourseLevel(level)
-                  if (!isNewTechnical) {
-                    setNewSessionDuration(level === 100 ? 180 : 120)
-                    setNewMeetingsPerWeek(level === 100 ? 1 : 2)
-                  }
-                }}
+                aria-label="Assign lecturer"
+                name="lecturer"
+                value={newCourseLecturer}
+                onChange={(e) => setNewCourseLecturer(e.target.value)}
               >
-                {[100, 200, 300, 400].map((level) => (
-                  <option key={level}>{level}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Expected enrollment
-              <input name="enrollment" type="number" min="1" defaultValue="30" required />
-            </label>
-            <label>
-              Session type
-              <select
-                name="sessionType"
-                value={newSessionType}
-                onChange={(event) => {
-                  const sessionType = event.target.value
-                  setNewSessionType(sessionType)
-                  if (sessionType === 'Practical') {
-                    setNewIsTechnical(true)
-                    setNewSessionDuration(120)
-                    setNewMeetingsPerWeek(2)
-                  }
-                }}
-              >
-                <option>Lecture</option>
-                <option>Tutorial</option>
-                <option>Practical</option>
-              </select>
-            </label>
-            <label>
-              Technical course
-              <span className="flex items-center gap-2">
-                <input
-                  checked={isNewTechnical}
-                  disabled={newSessionType === 'Practical'}
-                  name="isTechnical"
-                  onChange={(event) => {
-                    const isTechnical = event.target.checked
-                    setNewIsTechnical(isTechnical)
-                    setNewSessionDuration(isTechnical ? 120 : newCourseLevel === 100 ? 180 : 120)
-                    setNewMeetingsPerWeek(isTechnical ? 2 : newCourseLevel === 100 ? 1 : 2)
-                  }}
-                  type="checkbox"
-                />
-                Fixed 2-hour meetings twice weekly
-              </span>
-            </label>
-            <label>
-              Credits
-              <input name="credits" type="number" min="1" max="12" defaultValue="3" required />
-            </label>
-            <label>
-              Meeting length
-              <select
-                name="sessionDuration"
-                value={newSessionDuration}
-                onChange={(event) => setNewSessionDuration(Number(event.target.value))}
-              >
-                <option value={60}>1 hour</option>
-                <option value={90}>1.5 hours</option>
-                <option value={120}>2 hours</option>
-                {newCourseLevel === 100 && !isNewTechnical && (
-                  <option value={180}>3 hours · Level 100 core</option>
-                )}
-              </select>
-            </label>
-            <label>
-              Meetings per week
-              <select
-                name="meetingsPerWeek"
-                value={newMeetingsPerWeek}
-                onChange={(event) => setNewMeetingsPerWeek(Number(event.target.value))}
-              >
-                {(isNewTechnical ? [2] : [1, 2]).map((meetings) => (
-                  <option key={meetings} value={meetings}>
-                    {meetings}
-                  </option>
-                ))}
-              </select>
-              <small>
-                Total: {(newSessionDuration / 60) * newMeetingsPerWeek} contact hours per week.
-              </small>
-            </label>
-            <label>
-              Lecturer
-              <select aria-label="Assign lecturer" name="lecturer" defaultValue="">
                 <option value="">Unassigned</option>
                 {lecturers.map((lecturer) => (
                   <option value={lecturer.name} key={lecturer.id}>
-                    {lecturer.name}
+                    {lecturer.name} ({lecturer.department})
                   </option>
                 ))}
               </select>
-              <small>Assign a lecturer to this major and group section.</small>
+              {suggestedLecturers.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] font-semibold text-[#ad3532]">
+                    Suggested lecturers based on courses taught:
+                  </span>
+                  {suggestedLecturers.map((sug) => (
+                    <button
+                      type="button"
+                      key={sug.id}
+                      className="rounded-full border border-[#f5cfcc] bg-[#fff5f5] px-2.5 py-1 text-[11px] font-semibold text-[#ad3532] transition hover:bg-[#ffebeb]"
+                      onClick={() => setNewCourseLecturer(sug.name)}
+                    >
+                      + {sug.name} ({sug.department})
+                    </button>
+                  ))}
+                </div>
+              )}
+            </label>
+            <label>
+              Course duration &amp; meeting pattern
+              <select
+                name="durationOption"
+                value={newDurationOption}
+                onChange={(e) => setNewDurationOption(e.target.value as any)}
+              >
+                <option value="4hours">4 hours total: 2 hours on 2 different days</option>
+                <option value="3hours">3 hours total: Continuous 3-hour block on one day</option>
+                <option value="2hours">2 hours total: Single 2-hour session</option>
+                <option value="1hour">1 hour total: Single 1-hour session</option>
+              </select>
+              <small>
+                {newDurationOption === '4hours'
+                  ? 'System automatically places 2h on separate days for optimal retention.'
+                  : newDurationOption === '3hours'
+                    ? 'System schedules a single uninterrupted 3-hour timeslot.'
+                    : 'System schedules a single weekly session.'}
+              </small>
+            </label>
+            <label>
+              Session format
+              <select
+                name="sessionType"
+                value={newSessionType}
+                onChange={(e) => setNewSessionType(e.target.value)}
+              >
+                <option>Lecture</option>
+                <option>Practical</option>
+                <option>Tutorial</option>
+              </select>
+            </label>
+            <label>
+              Credits
+              <input name="credits" type="number" min="1" max="6" defaultValue="3" required />
+            </label>
+            <label>
+              Prerequisite course from previous semester (optional)
+              <input
+                name="prerequisite"
+                placeholder="e.g. CS 201 or EE 102"
+                value={newPrerequisite}
+                onChange={(e) => setNewPrerequisite(e.target.value)}
+              />
+              <small>Students must have passed this prerequisite in prior semester.</small>
             </label>
           </div>
           <div className="workspace-form-actions">
@@ -633,12 +733,16 @@ export function CoursesPage({
             const hasScheduledMeetings = sessions.some(
               (session) => getSectionKey(session) === getSectionKey(splittingCourse),
             )
+            const chosenLecturerA = splitLecturerA || String(data.get('groupALecturer'))
+            const chosenLecturerB = sameLecturerForBothGroups
+              ? chosenLecturerA
+              : splitLecturerB || String(data.get('groupBLecturer'))
             const groupBScheduled = onSplit(
               splittingCourse,
               groupAEnrollment,
-              String(data.get('groupALecturer')),
+              chosenLecturerA,
               groupBEnrollment,
-              String(data.get('groupBLecturer')),
+              chosenLecturerB,
             )
             if (!groupBScheduled) {
               setNotice(
@@ -656,8 +760,8 @@ export function CoursesPage({
             <div>
               <h2>Split {splittingCourse.code} into Groups A and B</h2>
               <p>
-                Set the headcount and lecturer for each group. The two counts must total{' '}
-                {splittingCourse.enrollment}.
+                Enrollment is {splittingCourse.enrollment} students. Divide into Group A and Group B.
+                Admin decides if the same lecturer teaches both groups or if separate lecturers are assigned.
               </p>
             </div>
             <button
@@ -669,37 +773,99 @@ export function CoursesPage({
               ×
             </button>
           </div>
+
+          <div className="rounded-xl border border-[#fae2b6] bg-[#fff8ea] p-3 text-xs text-[#8f5a11] mb-3">
+            <b>Timetable Policy:</b> Cohort division is strictly restricted to Group A and Group B. Group C cannot be added.
+          </div>
+
+          <div className="mb-4">
+            <label className="flex items-center gap-2 cursor-pointer font-medium text-sm text-[#252525]">
+              <input
+                type="checkbox"
+                checked={sameLecturerForBothGroups}
+                onChange={(e) => {
+                  setSameLecturerForBothGroups(e.target.checked)
+                  if (e.target.checked) {
+                    setSplitLecturerB(splitLecturerA || splittingCourse.lecturer)
+                  }
+                }}
+              />
+              <span>Same lecturer takes both Group A and Group B</span>
+            </label>
+            <p className="mt-1 text-xs text-[#72716e] ml-6">
+              {sameLecturerForBothGroups
+                ? 'The assigned lecturer will teach both Group A and Group B in separate slots.'
+                : 'Different lecturers will be assigned to Group A and Group B.'}
+            </p>
+          </div>
+
           <div className="workspace-form-grid">
-            {(['A', 'B'] as const).map((group) => (
-              <div className="card" key={group} style={{ padding: 14 }}>
-                <h3>Group {group}</h3>
-                <label>
-                  Students
-                  <input
-                    name={`group${group}Enrollment`}
-                    type="number"
-                    min="1"
-                    defaultValue={
-                      group === 'A'
-                        ? Math.ceil(splittingCourse.enrollment / 2)
-                        : Math.floor(splittingCourse.enrollment / 2)
+            <div className="card" style={{ padding: 14 }}>
+              <h3 className="font-semibold text-sm mb-2 text-[#252525]">Group A</h3>
+              <label>
+                Students
+                <input
+                  name="groupAEnrollment"
+                  type="number"
+                  min="1"
+                  defaultValue={Math.ceil(splittingCourse.enrollment / 2)}
+                  required
+                />
+              </label>
+              <label>
+                Lecturer
+                <select
+                  name="groupALecturer"
+                  value={splitLecturerA || splittingCourse.lecturer}
+                  onChange={(e) => {
+                    setSplitLecturerA(e.target.value)
+                    if (sameLecturerForBothGroups) {
+                      setSplitLecturerB(e.target.value)
                     }
-                    required
-                  />
-                </label>
-                <label>
-                  Lecturer
-                  <select name={`group${group}Lecturer`} defaultValue={splittingCourse.lecturer}>
-                    <option value="Unassigned">Unassigned</option>
-                    {lecturers.map((lecturer) => (
-                      <option key={lecturer.id} value={lecturer.name}>
-                        {lecturer.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            ))}
+                  }}
+                >
+                  <option value="Unassigned">Unassigned</option>
+                  {lecturers.map((lecturer) => (
+                    <option key={lecturer.id} value={lecturer.name}>
+                      {lecturer.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="card" style={{ padding: 14 }}>
+              <h3 className="font-semibold text-sm mb-2 text-[#252525]">Group B</h3>
+              <label>
+                Students
+                <input
+                  name="groupBEnrollment"
+                  type="number"
+                  min="1"
+                  defaultValue={Math.floor(splittingCourse.enrollment / 2)}
+                  required
+                />
+              </label>
+              <label>
+                Lecturer
+                <select
+                  name="groupBLecturer"
+                  disabled={sameLecturerForBothGroups}
+                  value={sameLecturerForBothGroups ? (splitLecturerA || splittingCourse.lecturer) : (splitLecturerB || splittingCourse.lecturer)}
+                  onChange={(e) => setSplitLecturerB(e.target.value)}
+                >
+                  <option value="Unassigned">Unassigned</option>
+                  {lecturers.map((lecturer) => (
+                    <option key={lecturer.id} value={lecturer.name}>
+                      {lecturer.name}
+                    </option>
+                  ))}
+                </select>
+                {sameLecturerForBothGroups && (
+                  <small className="text-[#8f5a11]">Mirrors Group A lecturer (uncheck toggle above to change)</small>
+                )}
+              </label>
+            </div>
           </div>
           <div className="workspace-form-actions">
             <button
@@ -710,7 +876,7 @@ export function CoursesPage({
               Cancel
             </button>
             <button className="button primary" type="submit">
-              Create Groups A and B
+              Confirm Group A &amp; B Split
             </button>
           </div>
         </form>
@@ -820,7 +986,147 @@ export function CoursesPage({
           </div>
         </form>
       )}
+      {editingExamCourse && (
+        <form
+          className="card workspace-form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            const data = new FormData(event.currentTarget)
+            const questions = String(data.get('questions') || '').trim()
+            const date = String(data.get('date') || '').trim()
+            const time = String(data.get('time') || '').trim()
+            const venue = String(data.get('venue') || '').trim()
+            const totalMarks = Number(data.get('totalMarks') || 100)
+            setCourseExams((prev) => ({
+              ...prev,
+              [getSectionKey(editingExamCourse)]: { questions, date, time, venue, totalMarks },
+            }))
+            setNotice(`Examination paper and questions saved for ${editingExamCourse.code} (${editingExamCourse.title}).`)
+            setEditingExamCourseKey(null)
+          }}
+        >
+          <div className="card-head">
+            <div>
+              <h2>Examination Questions &amp; Paper · {editingExamCourse.code}</h2>
+              <p>
+                {editingExamCourse.title} · {editingExamCourse.major} (Level {editingExamCourse.level}) · {editingExamCourse.enrollment} students taking exam
+              </p>
+            </div>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Close exam form"
+              onClick={() => setEditingExamCourseKey(null)}
+            >
+              &times;
+            </button>
+          </div>
+
+          <div className="workspace-form-grid">
+            <label>
+              Examination Date
+              <input
+                name="date"
+                type="date"
+                required
+                defaultValue={currentExamData?.date || '2026-12-16'}
+              />
+            </label>
+            <label>
+              Time Window
+              <input
+                name="time"
+                type="text"
+                required
+                placeholder="e.g. 09:00 - 12:00 (3 hours)"
+                defaultValue={currentExamData?.time || '09:00 - 12:00'}
+              />
+            </label>
+            <label>
+              Examination Venue / Hall
+              <input
+                name="venue"
+                type="text"
+                required
+                placeholder="e.g. Great Hall & Engineering 102"
+                defaultValue={currentExamData?.venue || 'Great Hall & Engineering 102'}
+              />
+            </label>
+            <label>
+              Total Marks
+              <input
+                name="totalMarks"
+                type="number"
+                min="20"
+                max="200"
+                defaultValue={currentExamData?.totalMarks || 100}
+                required
+              />
+            </label>
+            <label className="col-span-full">
+              Examination Questions &amp; Student Instructions
+              <textarea
+                name="questions"
+                rows={7}
+                required
+                className="w-full rounded-xl border border-[#deddd9] p-3 text-sm font-mono leading-relaxed focus:border-[#cc3634] focus:outline-none"
+                placeholder="Type or paste all examination questions here...
+Example:
+Section A (40 marks): Answer all questions.
+Question 1: Explain the fundamental principles of...
+Question 2: Derive the mathematical expression for...
+
+Section B (60 marks): Answer any two questions.
+Question 3: Design and implement the architecture for...
+Question 4: Analyze performance benchmarks under peak concurrency..."
+                defaultValue={currentExamData?.questions || ''}
+              />
+              <small>
+                Input all questions, sections, and marking criteria for the semester examination paper.
+              </small>
+            </label>
+          </div>
+
+          <div className="workspace-form-actions">
+            <button
+              type="button"
+              className="button secondary"
+              onClick={() => setEditingExamCourseKey(null)}
+            >
+              Cancel
+            </button>
+            <button className="button primary" type="submit">
+              Save Examination Questions
+            </button>
+          </div>
+        </form>
+      )}
       <section className="card workspace-table-card">
+        <div className="flex border-b border-[#ece8e5] bg-[#faf9f8] px-4 pt-3 gap-2">
+          <button
+            type="button"
+            className={`rounded-t-lg px-4 py-2 text-xs font-semibold border-b-2 transition ${
+              activeTab === 'sections'
+                ? 'border-[#ad3532] text-[#ad3532] bg-white shadow-xs'
+                : 'border-transparent text-[#706c68] hover:text-[#252525]'
+            }`}
+            onClick={() => setActiveTab('sections')}
+          >
+            Course Sections &amp; Allocations
+          </button>
+          <button
+            type="button"
+            className={`rounded-t-lg px-4 py-2 text-xs font-semibold border-b-2 transition ${
+              activeTab === 'catalogue'
+                ? 'border-[#ad3532] text-[#ad3532] bg-white shadow-xs'
+                : 'border-transparent text-[#706c68] hover:text-[#252525]'
+            }`}
+            onClick={() => setActiveTab('catalogue')}
+          >
+            Course Catalogue &amp; Exam Schedule
+          </button>
+        </div>
+
         <div className="workspace-toolbar">
           <label className="field-search">
             <PageIcon name="search" />
@@ -884,111 +1190,239 @@ export function CoursesPage({
             <PageIcon name="download" /> Export CSV
           </button>
         </div>
-        <div className="workspace-table-scroll">
-          <table className="workspace-table">
-            <thead>
-              <tr>
-                <th>Course</th>
-                <th>Major & level</th>
-                <th>Group</th>
-                <th>Enrollment</th>
-                <th>Lecturer</th>
-                <th>Format</th>
-                <th>Credits</th>
-                <th>Weekly pattern</th>
-                <th>Schedule</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((course) => {
-                const scheduled = sessions.filter(
-                  (session) => getSectionKey(session) === getSectionKey(course),
-                )
-                const hasGroupSections = courses.some(
-                  (other) =>
-                    other.code === course.code &&
-                    other.major === course.major &&
-                    other.level === course.level &&
-                    other.group,
-                )
-                return (
-                  <tr key={getSectionKey(course)}>
-                    <td>
-                      <b>{course.code}</b>
-                      <span>{course.title}</span>
-                      {course.sectionId && <small>Sample section · {course.sectionId}</small>}
-                    </td>
-                    <td>
-                      {course.major}
-                      <small>Level {course.level}</small>
-                    </td>
-                    <td>{course.group ? `Group ${course.group}` : 'Whole cohort'}</td>
-                    <td>{course.enrollment}</td>
-                    <td>{course.lecturer}</td>
-                    <td>
-                      {course.sessionType}
-                      {isTechnicalCourse(course) && <small>Technical · fixed 2h × 2 / week</small>}
-                    </td>
-                    <td>{course.credits}</td>
-                    <td>
-                      {course.sessionDuration && course.meetingsPerWeek
-                        ? `${course.sessionDuration / 60}h × ${course.meetingsPerWeek} / week · ${course.weeklyHours}h total`
-                        : 'Not set'}
-                    </td>
-                    <td>
-                      {scheduled.length ? (
-                        <div className="grid gap-1">
-                          {scheduled.map((session) => (
-                            <span key={getSessionKey(session)}>
-                              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri'][session.day]} ·{' '}
-                              {String(Math.floor(session.start / 60)).padStart(2, '0')}:00
+
+        {activeTab === 'sections' ? (
+          <div className="workspace-table-scroll">
+            <table className="workspace-table">
+              <thead>
+                <tr>
+                  <th>Course</th>
+                  <th>Major &amp; level</th>
+                  <th>Group</th>
+                  <th>Enrollment</th>
+                  <th>Assign Lecturer</th>
+                  <th>Format</th>
+                  <th>Credits</th>
+                  <th>Weekly pattern</th>
+                  <th>Schedule</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((course) => {
+                  const scheduled = sessions.filter(
+                    (session) => getSectionKey(session) === getSectionKey(course),
+                  )
+                  const hasGroupSections = courses.some(
+                    (other) =>
+                      other.code === course.code &&
+                      other.major === course.major &&
+                      other.level === course.level &&
+                      other.group,
+                  )
+                  const isHighEnrollment = course.enrollment >= 60 && !course.group
+
+                  return (
+                    <tr key={getSectionKey(course)}>
+                      <td>
+                        <b>{course.code}</b>
+                        <span>{course.title}</span>
+                        {course.sectionId && <small>Sample section · {course.sectionId}</small>}
+                        {course.prerequisites && course.prerequisites.length > 0 && (
+                          <small className="text-[#a83533] font-medium">
+                            Prereq: {course.prerequisites.join(', ')}
+                          </small>
+                        )}
+                      </td>
+                      <td>
+                        {course.major}
+                        <small>Level {course.level}</small>
+                      </td>
+                      <td>{course.group ? `Group ${course.group}` : 'Whole cohort'}</td>
+                      <td>
+                        <div className="flex flex-col gap-1">
+                          <span className="font-semibold text-sm">{course.enrollment} students</span>
+                          {isHighEnrollment && (
+                            <span className="inline-flex w-fit items-center gap-1 rounded bg-[#fff0f0] px-1.5 py-0.5 text-[10px] font-bold text-[#b52a28] border border-[#f5c6c4]">
+                              &gt;60 students · Split A/B
                             </span>
-                          ))}
+                          )}
                         </div>
-                      ) : (
-                        <button className="text-button" onClick={() => onNavigate('Scheduling')}>
-                          Find a slot <PageIcon name="arrow" />
-                        </button>
-                      )}
-                    </td>
-                    <td>
-                      <span
-                        className={`workspace-status ${course.status === 'Scheduled' ? 'positive' : 'warning'}`}
-                      >
-                        {course.status}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="flex flex-col items-start gap-1">
-                        <button className="text-button" onClick={() => startEditingPattern(course)}>
-                          Edit pattern
-                        </button>
-                        {!course.group && !hasGroupSections && course.enrollment > 1 && (
-                          <button
-                            className="text-button"
-                            onClick={() => {
-                              setSplittingCourseKey(getSectionKey(course))
-                              setNotice('')
-                            }}
-                          >
-                            Split A/B
+                      </td>
+                      <td>
+                        <select
+                          aria-label={`Assign lecturer for ${course.code}`}
+                          className="rounded border border-[#deddd9] bg-white px-2 py-1 text-xs font-medium text-[#252525] focus:border-[#cc3634] focus:outline-none"
+                          value={course.lecturer}
+                          onChange={(e) => {
+                            onAssignLecturer?.(course, e.target.value)
+                            setNotice(`Assigned ${e.target.value} to ${course.code} (${course.major}).`)
+                          }}
+                        >
+                          <option value="Unassigned">Unassigned</option>
+                          {lecturers.map((lecturer) => (
+                            <option key={lecturer.id} value={lecturer.name}>
+                              {lecturer.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        {course.sessionType}
+                        {isTechnicalCourse(course) && <small>Technical · fixed 2h × 2 / week</small>}
+                      </td>
+                      <td>{course.credits}</td>
+                      <td>
+                        {course.sessionDuration && course.meetingsPerWeek
+                          ? `${course.sessionDuration / 60}h × ${course.meetingsPerWeek} / week · ${course.weeklyHours}h total`
+                          : 'Not set'}
+                      </td>
+                      <td>
+                        {scheduled.length ? (
+                          <div className="grid gap-1">
+                            {scheduled.map((session) => (
+                              <span key={getSessionKey(session)}>
+                                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri'][session.day]} ·{' '}
+                                {String(Math.floor(session.start / 60)).padStart(2, '0')}:00
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <button className="text-button" onClick={() => onNavigate('Scheduling')}>
+                            Find a slot <PageIcon name="arrow" />
                           </button>
                         )}
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+                      </td>
+                      <td>
+                        <span
+                          className={`workspace-status ${course.status === 'Scheduled' ? 'positive' : 'warning'}`}
+                        >
+                          {course.status}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="flex flex-col items-start gap-1">
+                          <button className="text-button" onClick={() => startEditingPattern(course)}>
+                            Edit pattern
+                          </button>
+                          {!course.group && !hasGroupSections && course.enrollment > 1 && (
+                            <button
+                              className={`text-button ${isHighEnrollment ? 'font-bold text-[#b52a28]' : ''}`}
+                              onClick={() => {
+                                setSplittingCourseKey(getSectionKey(course))
+                                setNotice('')
+                              }}
+                            >
+                              {isHighEnrollment ? 'Split into Group A & B' : 'Split A/B'}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="workspace-table-scroll">
+            <table className="workspace-table">
+              <thead>
+                <tr>
+                  <th>Course Code &amp; Title</th>
+                  <th>Major &amp; Level</th>
+                  <th>Enrollment Headcount</th>
+                  <th>Assigned Lecturer</th>
+                  <th>Prerequisites</th>
+                  <th>Exam Schedule &amp; Venue</th>
+                  <th>Exam Questions</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((course) => {
+                  const exam = courseExams[getSectionKey(course)]
+                  return (
+                    <tr key={getSectionKey(course)}>
+                      <td>
+                        <b className="text-sm">{course.code}</b>
+                        <span>{course.title}</span>
+                        {course.group && <small>Group {course.group}</small>}
+                      </td>
+                      <td>
+                        {course.major}
+                        <small>Level {course.level}</small>
+                      </td>
+                      <td>
+                        <span className="font-semibold text-sm">{course.enrollment} students</span>
+                        {course.enrollment >= 60 && !course.group && (
+                          <small className="block text-[#b52a28] font-bold">
+                            Exceeds 60 (Divided into Group A &amp; B recommended)
+                          </small>
+                        )}
+                      </td>
+                      <td>
+                        <span className="font-medium">{course.lecturer}</span>
+                      </td>
+                      <td>
+                        <span className="text-xs text-[#555]">
+                          {course.prerequisites && course.prerequisites.length > 0
+                            ? `Passed: ${course.prerequisites.join(', ')}`
+                            : 'No prerequisite needed'}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="text-xs">
+                          <b className="text-[#252525]">
+                            {exam?.date || 'Dec 16, 2026'} · {exam?.time || '09:00 - 12:00'}
+                          </b>
+                          <span className="block text-[#72716e]">
+                            {exam?.venue || 'Great Hall & Engineering 102'}
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        {exam?.questions ? (
+                          <div className="text-xs">
+                            <span className="inline-flex items-center rounded bg-[#eef8f2] px-2 py-0.5 text-[10px] font-bold text-[#2e7d4d] border border-[#c6ebd4]">
+                              Questions Set ({exam.totalMarks} marks)
+                            </span>
+                            <p className="mt-1 line-clamp-2 max-w-[200px] text-[11px] text-[#555] font-mono leading-tight">
+                              {exam.questions.slice(0, 75)}...
+                            </p>
+                          </div>
+                        ) : (
+                          <span className="inline-flex items-center rounded bg-[#fff8ea] px-2 py-0.5 text-[10px] font-semibold text-[#9a6414] border border-[#fae2b6]">
+                            No questions set
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="text-button font-medium text-[#ad3532]"
+                          onClick={() => {
+                            setEditingExamCourseKey(getSectionKey(course))
+                            setNotice('')
+                          }}
+                        >
+                          {exam?.questions ? 'Edit Questions' : 'Input Exam Questions'}
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         {filtered.length === 0 && (
           <div className="workspace-empty">No courses match these filters.</div>
         )}
         <div className="table-note">
-          Sample catalogue only. Additions are temporary and do not update university records.
+          Academic City course records. Cohort division allows strictly Group A and Group B.
         </div>
       </section>
     </>
@@ -2529,9 +2963,10 @@ export function SettingsPage({
       draft.dayStartTime || '08:00',
       draft.periodDuration || 60,
       draft.breakDuration !== undefined ? draft.breakDuration : 10,
-      draft.dayEndTime || '18:20',
+      draft.dayEndTime || '18:00',
+      draft.periodCount || 9,
     )
-  }, [draft.dayStartTime, draft.periodDuration, draft.breakDuration, draft.dayEndTime])
+  }, [draft.dayStartTime, draft.periodDuration, draft.breakDuration, draft.dayEndTime, draft.periodCount])
   const periodDuration = draft.periodDuration || 60
   const calculatedDayEnd = minutesToTimeString(
     (calculatedPeriods[calculatedPeriods.length - 1] ?? 480) + periodDuration,
@@ -2672,58 +3107,74 @@ export function SettingsPage({
                 className="timing-setting-control"
                 type="time"
                 value={draft.dayStartTime || '08:00'}
-                onChange={(event) => update('dayStartTime', event.target.value)}
+                onChange={(event) => {
+                  const val = event.target.value
+                  update('dayStartTime', val)
+                  const startM = timeStringToMinutes(val)
+                  const endM = timeStringToMinutes(draft.dayEndTime || '18:00')
+                  const count = draft.periodCount || 9
+                  const duration = Math.floor(Math.max(60, endM - startM) / count)
+                  update('periodDuration', duration)
+                }}
               />
               <small>When the first class begins.</small>
             </label>
 
             <label className="timing-setting-field">
-              <span>Class period duration</span>
-              <select
-                className="timing-setting-control"
-                value={periodDuration}
-                onChange={(event) => {
-                  const val = Number(event.target.value)
-                  update('periodDuration', val)
-                  update('defaultSessionLength', val)
-                }}
-              >
-                <option value={45}>45 minutes</option>
-                <option value={50}>50 minutes</option>
-                <option value={60}>60 minutes (1 hour)</option>
-                <option value={75}>75 minutes (1h 15m)</option>
-                <option value={90}>90 minutes (1.5 hours)</option>
-                <option value={120}>120 minutes (2 hours)</option>
-              </select>
-              <small>Length of one timetable period.</small>
-            </label>
-
-            <label className="timing-setting-field">
-              <span>Break between periods</span>
-              <select
-                className="timing-setting-control"
-                value={draft.breakDuration !== undefined ? draft.breakDuration : 10}
-                onChange={(event) => update('breakDuration', Number(event.target.value))}
-              >
-                <option value={0}>No break (0 min)</option>
-                <option value={5}>5 minutes</option>
-                <option value={10}>10 minutes</option>
-                <option value={15}>15 minutes</option>
-                <option value={20}>20 minutes</option>
-                <option value={30}>30 minutes</option>
-              </select>
-              <small>Transition time between classes.</small>
-            </label>
-
-            <label className="timing-setting-field">
-              <span>Day end time limit</span>
+              <span>Day end time</span>
               <input
                 className="timing-setting-control"
                 type="time"
-                value={draft.dayEndTime || '18:20'}
-                onChange={(event) => update('dayEndTime', event.target.value)}
+                value={draft.dayEndTime || '18:00'}
+                onChange={(event) => {
+                  const val = event.target.value
+                  update('dayEndTime', val)
+                  const startM = timeStringToMinutes(draft.dayStartTime || '08:00')
+                  const endM = timeStringToMinutes(val)
+                  const count = draft.periodCount || 9
+                  const duration = Math.floor(Math.max(60, endM - startM) / count)
+                  update('periodDuration', duration)
+                }}
               />
-              <small>Latest allowable class finish time.</small>
+              <small>When daily teaching finishes.</small>
+            </label>
+
+            <label className="timing-setting-field">
+              <span>Standard periods per day</span>
+              <input
+                className="timing-setting-control"
+                type="number"
+                min="4"
+                max="14"
+                value={draft.periodCount || 9}
+                onChange={(event) => {
+                  const count = Math.max(1, Number(event.target.value))
+                  update('periodCount', count)
+                  const startM = timeStringToMinutes(draft.dayStartTime || '08:00')
+                  const endM = timeStringToMinutes(draft.dayEndTime || '18:00')
+                  const duration = Math.floor(Math.max(60, endM - startM) / count)
+                  update('periodDuration', duration)
+                }}
+              />
+              <small>Default 9 periods (editable at your discretion).</small>
+            </label>
+
+            <label className="timing-setting-field">
+              <span>Saturday schedule</span>
+              <button
+                type="button"
+                className={`mt-1 flex w-full items-center justify-center gap-2 rounded-xl border py-2.5 px-3 text-xs font-semibold transition ${
+                  draft.includeSaturday
+                    ? 'border-[#ad3532] bg-[#ad3532] text-white shadow-xs'
+                    : 'border-[#deddd9] bg-white text-[#454442] hover:bg-[#faf9f7]'
+                }`}
+                onClick={() => update('includeSaturday', !draft.includeSaturday)}
+              >
+                {draft.includeSaturday
+                  ? 'Saturday Included (Mon–Sat)'
+                  : '+ Add Saturday to Timetable (Default: Mon–Fri)'}
+              </button>
+              <small>By default Mon–Fri. Click to include Saturday in timetable.</small>
             </label>
           </div>
 

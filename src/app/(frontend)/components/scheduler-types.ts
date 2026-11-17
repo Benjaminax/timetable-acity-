@@ -39,9 +39,19 @@ export function calculateTimetablePeriods(
   durationMin: number = 60,
   breakMin: number = 10,
   endTimeStr: string = '18:20',
+  targetPeriodCount?: number,
 ): number[] {
   const startMinutes = timeStringToMinutes(startTimeStr)
   const endMinutes = timeStringToMinutes(endTimeStr)
+  if (targetPeriodCount && targetPeriodCount > 0) {
+    const totalMinutes = Math.max(60, endMinutes - startMinutes)
+    const step = totalMinutes / targetPeriodCount
+    const periods: number[] = []
+    for (let i = 0; i < targetPeriodCount; i++) {
+      periods.push(Math.round(startMinutes + i * step))
+    }
+    return periods
+  }
   const periods: number[] = []
   let current = startMinutes
   while (current + durationMin <= endMinutes && periods.length < 14) {
@@ -76,10 +86,14 @@ export type Session = {
   programmes?: string[]
   electiveGroup?: string
   sharedCourseId?: string
+  prerequisites?: string[]
+  passedPrerequisites?: boolean
   semester?: 1 | 2
   academicPeriod?: AcademicPeriod
   intake?: CohortIntake
   weeklyHours?: number
+  examQuestions?: string
+  examDate?: string
 }
 
 export type Room = {
@@ -111,6 +125,8 @@ export function getSectionKey(section: {
   sectionId?: string
   group?: SectionGroup
   sharedCourseId?: string
+  prerequisites?: string[]
+  passedPrerequisites?: boolean
 }) {
   const sectionIdentity = section.sectionId
     ? `${section.sectionId}${section.group ? `-${section.group}` : ''}`
@@ -243,12 +259,16 @@ export type Course = {
   programmes?: string[]
   electiveGroup?: string
   sharedCourseId?: string
+  prerequisites?: string[]
+  passedPrerequisites?: boolean
   semester?: 1 | 2
   academicPeriod?: AcademicPeriod
   intake?: CohortIntake
   sessionDuration?: number
   meetingsPerWeek?: number
   weeklyHours?: number
+  examQuestions?: string
+  examDate?: string
 }
 
 export type CourseMeetingPattern = {
@@ -417,4 +437,6 @@ export type AppSettings = {
   dayEndTime?: string
   periodDuration?: number
   breakDuration?: number
+  periodCount?: number
+  includeSaturday?: boolean
 }
