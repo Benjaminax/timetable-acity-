@@ -2351,10 +2351,9 @@ export default function App({
   )
   const [page, setPage] = useState('Dashboard')
   const navigateToPage = useTabScrollRestoration(page, setPage)
-  const activeNavigationIndex = Math.max(
-    0,
-    nav.findIndex(([label]) => label === page),
-  )
+  const currentNavIndex = nav.findIndex(([label]) => label === page)
+  const isNavActive = currentNavIndex >= 0
+  const activeNavigationIndex = isNavActive ? currentNavIndex : 0
   const notificationWrapRef = useRef<HTMLDivElement | null>(null)
   const [sessions, setSessions] = useState(initialTeachingAssignments.sessions)
   const [weekOverrides, setWeekOverrides] = useState<Record<string, Session>>({})
@@ -3202,12 +3201,14 @@ export default function App({
         </main>
         {role === 'admin' && (
           <nav className="bottom-navigation admin-bottom-nav" aria-label="Administrator navigation">
-            <div className="admin-nav-fixed">
-              {page !== 'Notifications' && (
+            <div
+              className="admin-nav-fixed"
+              style={{ '--active-index': activeNavigationIndex } as React.CSSProperties}
+            >
+              {isNavActive && (
                 <span
                   className="bottom-nav-indicator"
                   aria-hidden="true"
-                  style={{ transform: `translateX(${activeNavigationIndex * (100 / nav.length)}%)`, width: `${100 / nav.length}%` }}
                 />
               )}
               {nav.map(([label, icon]) => (
