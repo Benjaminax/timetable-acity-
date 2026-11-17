@@ -1,6 +1,6 @@
 'use client'
 
-import { Fragment, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import AppIcon, { isAppIconName } from './AppIcon'
 import {
   calculateTimetablePeriods,
@@ -258,6 +258,109 @@ function downloadCsv(filename: string, rows: string[][]) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
+function SearchableLecturerPicker({
+  value,
+  lecturers,
+  onChange,
+  disabled,
+}: {
+  value: string
+  lecturers: Lecturer[]
+  onChange: (lecturerName: string) => void
+  disabled?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return lecturers
+    return lecturers.filter(
+      (l) => l.name.toLowerCase().includes(q) || l.department.toLowerCase().includes(q),
+    )
+  }, [search, lecturers])
+
+  useEffect(() => {
+    const handleOutside = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+        setSearch('')
+      }
+    }
+    document.addEventListener('mousedown', handleOutside)
+    return () => document.removeEventListener('mousedown', handleOutside)
+  }, [])
+
+  return (
+    <div className="searchable-lecturer-container" ref={containerRef}>
+      <button
+        type="button"
+        disabled={disabled}
+        className="searchable-lecturer-trigger"
+        onClick={() => {
+          setOpen((prev) => !prev)
+          setSearch('')
+        }}
+        aria-label="Assign lecturer"
+      >
+        <span className="truncate">{value || 'Unassigned'}</span>
+        <svg
+          className="ml-1 size-3.5 shrink-0 text-[#888]"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="searchable-lecturer-popover">
+          <input
+            type="text"
+            autoFocus
+            className="searchable-lecturer-filter"
+            placeholder="Type name or dept..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <button
+            type="button"
+            className="searchable-lecturer-item"
+            onClick={() => {
+              onChange('Unassigned')
+              setOpen(false)
+              setSearch('')
+            }}
+          >
+            <b>Unassigned</b>
+            <span>Clear assignment</span>
+          </button>
+          {filtered.map((lecturer) => (
+            <button
+              type="button"
+              key={lecturer.id}
+              className={`searchable-lecturer-item ${value === lecturer.name ? 'active' : ''}`}
+              onClick={() => {
+                onChange(lecturer.name)
+                setOpen(false)
+                setSearch('')
+              }}
+            >
+              <b>{lecturer.name}</b>
+              <span>{lecturer.department}</span>
+            </button>
+          ))}
+          {filtered.length === 0 && (
+            <div className="py-2 text-center text-[11px] text-[#888]">No matching lecturers</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function CoursesPage({
   courses,
   lecturers,
@@ -507,9 +610,9 @@ export function CoursesPage({
   return (
     <>
       <Heading
-        eyebrow="Academic records · Sample data"
+        eyebrow="Academic City University · Course Records"
         title="Course catalogue"
-        description="Courses stay as one whole cohort by default. Split A/B only when enrollment needs separate classes; smaller classes can stay with one lecturer."
+        description="Manage curriculum sections, cohort allocations, and weekly teaching schedules."
       >
         <button className="button primary" onClick={() => setShowForm((open) => !open)}>
           <PageIcon name="plus" /> Add course
@@ -519,7 +622,7 @@ export function CoursesPage({
         <Metric
           label="Course sections"
           value={String(courses.length)}
-          note="Sample records"
+          note="Active records"
           icon="book"
         />
         <Metric
@@ -537,7 +640,7 @@ export function CoursesPage({
         <Metric
           label="Majors represented"
           value={String(majors.length)}
-          note="In this sample"
+          note="Academic programmes"
           icon="students"
         />
       </div>
@@ -551,10 +654,9 @@ export function CoursesPage({
         <form className="card workspace-form" onSubmit={addCourse}>
           <div className="card-head">
             <div>
-              <h2>Add a sample course</h2>
+              <h2>Add a course</h2>
               <p>
-                Technical courses meet for two hours twice a week. Other courses can use a validated
-                weekly pattern; non-technical Level 100 core courses may meet for three hours once.
+                Configure course code, title, duration, prerequisite and proposed lecturer.
               </p>
             </div>
             <button
@@ -1228,7 +1330,7 @@ Question 4: Analyze performance benchmarks under peak concurrency..."
                       <td>
                         <b>{course.code}</b>
                         <span>{course.title}</span>
-                        {course.sectionId && <small>Sample section · {course.sectionId}</small>}
+                        {course.sectionId && <small>Section {course.sectionId}</small>}
                         {course.prerequisites && course.prerequisites.length > 0 && (
                           <small className="text-[#a83533] font-medium">
                             Prereq: {course.prerequisites.join(', ')}
@@ -1251,22 +1353,14 @@ Question 4: Analyze performance benchmarks under peak concurrency..."
                         </div>
                       </td>
                       <td>
-                        <select
-                          aria-label={`Assign lecturer for ${course.code}`}
-                          className="rounded border border-[#deddd9] bg-white px-2 py-1 text-xs font-medium text-[#252525] focus:border-[#cc3634] focus:outline-none"
+                        <SearchableLecturerPicker
                           value={course.lecturer}
-                          onChange={(e) => {
-                            onAssignLecturer?.(course, e.target.value)
-                            setNotice(`Assigned ${e.target.value} to ${course.code} (${course.major}).`)
+                          lecturers={lecturers}
+                          onChange={(lecturerName) => {
+                            onAssignLecturer?.(course, lecturerName)
+                            setNotice(`Assigned ${lecturerName} to ${course.code} (${course.major}).`)
                           }}
-                        >
-                          <option value="Unassigned">Unassigned</option>
-                          {lecturers.map((lecturer) => (
-                            <option key={lecturer.id} value={lecturer.name}>
-                              {lecturer.name}
-                            </option>
-                          ))}
-                        </select>
+                        />
                       </td>
                       <td>
                         {course.sessionType}
@@ -1467,21 +1561,21 @@ export function StudentsPage({
   return (
     <>
       <Heading
-        eyebrow="Academic records · Sample data"
+        eyebrow="Academic City University · Student Registry"
         title="Student directory"
-        description="Open any student profile to review academic details, status, and the shared cohort timetable."
+        description="Review student academic records, programme enrollments, and cohort timetables."
       />
       <div className="workspace-metrics">
         <Metric
           label="Roster records"
           value={String(students.length)}
-          note="Not the full university register"
+          note="Enrolled students"
           icon="students"
         />
         <Metric
           label="Registered"
           value={String(students.filter((student) => student.status === 'Registered').length)}
-          note="Sample status"
+          note="Active status"
           icon="check"
         />
         <Metric
@@ -1818,9 +1912,9 @@ export function LecturersPage({
   return (
     <>
       <Heading
-        eyebrow="Academic records · Sample data"
-        title="Lecturer assignments"
-        description="Add demo teachers, assign courses, and review their weekly timetable."
+        eyebrow="Academic City University · Faculty Directory"
+        title="Faculty & teaching assignments"
+        description="Faculty members, teaching assignments, and weekly lecture schedules."
       >
         <div className="lecturer-heading-actions">
           <button className="button primary" onClick={() => setShowForm((open) => !open)}>
@@ -1840,19 +1934,19 @@ export function LecturersPage({
         <Metric
           label="Lecturers"
           value={String(lecturers.length)}
-          note="Sample staff records"
+          note="Faculty members"
           icon="lecturer"
         />
         <Metric
           label="Scheduled sessions"
           value={String(sessions.length)}
-          note="Across all sample staff"
+          note="Active teaching slots"
           icon="calendar"
         />
         <Metric
           label="Teaching hours"
           value={`${sessions.reduce((sum, session) => sum + session.duration / 60, 0)} hrs`}
-          note="Sample week total"
+          note="Weekly contact hours"
           icon="clock"
         />
         <Metric
@@ -2311,9 +2405,9 @@ export function SchedulingPage({
   return (
     <>
       <Heading
-        eyebrow="Academic operations · Sample data"
+        eyebrow="Academic Operations · Timetable Engine"
         title="Generate timetable"
-        description="Audit current placements and preview coverage before planning another schedule run."
+        description="Audit current placements and review schedule coverage across all departments."
       >
         <button className="button primary" onClick={() => setGenerated(true)}>
           <PageIcon name="chart" /> Run schedule check
@@ -2974,9 +3068,9 @@ export function SettingsPage({
   return (
     <>
       <Heading
-        eyebrow="Workspace preferences · Sample data"
+        eyebrow="Academic City University · System Configuration"
         title="System settings"
-        description="Configure how this local scheduling prototype presents and checks timetable data."
+        description="Configure academic term, timetable windows, period structure, and scheduling rules."
       />
       <div className="workspace-settings-grid">
         <section className="card workspace-setting-card">

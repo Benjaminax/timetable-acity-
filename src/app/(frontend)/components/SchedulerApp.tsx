@@ -34,7 +34,6 @@ import {
   toggleLecturerUnavailabilityBlock,
 } from './scheduler-types'
 import { downloadElementPng } from './capture-element-png'
-import { GoogleCalendarModal } from './GoogleCalendarModal'
 import AppIcon, { type AppIconName } from './AppIcon'
 import {
   CoursesPage,
@@ -1054,6 +1053,7 @@ function Dashboard({
   lecturerUnavailability,
   confirmedSectionKeys = [],
   onToggleConfirmLecturer,
+  onNavigateLecturerTimetable,
 }: {
   onNavigate: (v: string) => void
   onReschedule: (session: Session) => void
@@ -1066,8 +1066,10 @@ function Dashboard({
   lecturerUnavailability: LecturerUnavailabilityByName
   confirmedSectionKeys?: string[]
   onToggleConfirmLecturer?: (lecturerName: string) => void
+  onNavigateLecturerTimetable?: (name: string) => void
 }) {
   const [confirmationFilter, setConfirmationFilter] = useState<'all' | 'confirmed' | 'pending'>('all')
+  const [confirmSearch, setConfirmSearch] = useState('')
   const issues = analyzeSchedule(sessions, rooms, lecturerUnavailability)
   const score = Math.max(0, 100 - issues.length * 12)
   const sessionsWithFindings = new Set(issues.map((issue) => getSessionKey(issue.session))).size
@@ -1131,27 +1133,27 @@ function Dashboard({
   })
   const dashboardMetrics = [
     {
-      label: 'Sample students',
+      label: 'Enrolled students',
       value: students.length.toLocaleString(),
-      delta: 'Illustrative roster only',
+      delta: 'Active cohort roster',
       icon: 'students' as IconName,
     },
     {
-      label: 'Sample lecturers',
+      label: 'Faculty lecturers',
       value: String(lecturers.length),
-      delta: 'Teaching assignments shown',
+      delta: 'Teaching assignments',
       icon: 'lecturer' as IconName,
     },
     {
       label: 'Course sections',
       value: String(courses.length),
-      delta: `${courses.filter((course) => !sessions.some((session) => getSectionKey(session) === getSectionKey(course))).length} need a slot`,
+      delta: `${courses.filter((course) => !sessions.some((session) => getSectionKey(session) === getSectionKey(course))).length} unallocated`,
       icon: 'book' as IconName,
     },
     {
-      label: 'Sample classrooms',
+      label: 'Campus classrooms',
       value: String(rooms.length),
-      delta: `${rooms.filter((room) => room.status !== 'Restricted').length} available for planning`,
+      delta: `${rooms.filter((room) => room.status !== 'Restricted').length} active lecture spaces`,
       icon: 'building' as IconName,
     },
   ]
@@ -1160,9 +1162,9 @@ function Dashboard({
     <>
       <section className="page-heading">
         <div>
-          <p className="eyebrow">{formatDate(0)} · Sample schedule</p>
-          <h1>Good morning, Nana.</h1>
-          <p>Here’s a live view of the sample timetable and its planning records.</p>
+          <p className="eyebrow">{formatDate(0)} · Academic City University</p>
+          <h1>Academic Operations Portal</h1>
+          <p>Central management for faculty teaching confirmations, cohort timetables, and lecture hall allocations.</p>
         </div>
         <Button onClick={() => onNavigate('Scheduling')}>
           <Icon name="sparkles" size={16} /> Generate timetable
@@ -1177,7 +1179,7 @@ function Dashboard({
         <section className="card schedule-overview">
           <div className="card-head">
             <div>
-              <h2>Example cohort timetable</h2>
+              <h2>Cohort weekly timetable</h2>
               <p>
                 Computer Science · Level 100 · September cohort · {activePeriod} term ·{' '}
                 {getWeekLabel(initialWeekStart)}
@@ -1229,9 +1231,9 @@ function Dashboard({
             <div className="card-head">
               <div>
                 <h2>Scheduling health</h2>
-                <p>Based on sample records</p>
+                <p>Based on current allocations</p>
               </div>
-              <span className="sample-pill">Sample</span>
+              <span className="sample-pill bg-[#eef8f2] text-[#2e7d4d] border border-[#c6ebd4]">Active Term</span>
             </div>
             <div className="health-chart">
               <div
@@ -1379,6 +1381,13 @@ function Dashboard({
           </div>
         </div>
 
+        <input
+          className="confirmation-search"
+          placeholder="Search lecturers..."
+          value={confirmSearch}
+          onChange={(e) => setConfirmSearch(e.target.value)}
+        />
+
         <div className="flex gap-2 mb-3">
           {(['all', 'confirmed', 'pending'] as const).map((filter) => (
             <button
@@ -1399,51 +1408,54 @@ function Dashboard({
           ))}
         </div>
 
-        <div className="grid gap-2.5 md:grid-cols-2">
-          {displayedLecturers.map((item) => (
-            <div
-              key={item.lecturer.id}
-              className="flex items-center justify-between gap-3 rounded-xl border border-[#ebebe8] bg-[#fafaf8] p-3 transition hover:bg-white hover:shadow-xs"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <b className="truncate text-sm text-[#252525]">{item.lecturer.name}</b>
-                  <span
-                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                      item.isConfirmed
-                        ? 'bg-[#eef8f2] text-[#2e7d4d] border border-[#c6ebd4]'
-                        : 'bg-[#fff8ea] text-[#9a6414] border border-[#fae2b6]'
-                    }`}
-                  >
-                    {item.isConfirmed ? 'Confirmed' : 'Pending'}
-                  </span>
-                </div>
-                <p className="mt-0.5 truncate text-xs text-[#72716e]">
-                  {item.lecturer.department} · {item.assignedSections.length} course section{item.assignedSections.length === 1 ? '' : 's'}
-                </p>
-                <div className="mt-1.5 flex flex-wrap gap-1">
-                  {item.assignedSections.map((sec) => (
-                    <span
-                      key={getSectionKey(sec)}
-                      className="rounded bg-white px-1.5 py-0.5 text-[10px] font-medium text-[#555] border border-[#e5e5e2]"
-                    >
-                      {sec.code}{sec.group ? ` (Grp ${sec.group})` : ''}
-                    </span>
-                  ))}
-                </div>
-              </div>
-              <div className="flex flex-col items-end gap-1 shrink-0">
+        <ul className="confirmation-list">
+          {displayedLecturers
+            .filter(item =>
+              item.lecturer.name.toLowerCase().includes(confirmSearch.toLowerCase()) ||
+              item.lecturer.department.toLowerCase().includes(confirmSearch.toLowerCase())
+            )
+            .map(item => (
+              <li key={item.lecturer.id} className="confirmation-list-item">
                 <button
+                  className="confirmation-list-row"
+                  onClick={() => onNavigateLecturerTimetable?.(item.lecturer.name)}
                   type="button"
-                  className="rounded-lg border border-[#deddd9] bg-white px-2.5 py-1 text-xs font-semibold text-[#333] hover:bg-[#f6f5f3]"
-                  onClick={() => onToggleConfirmLecturer?.(item.lecturer.name)}
                 >
-                  {item.isConfirmed ? 'Mark pending' : 'Confirm timetable'}
+                  <div className="confirmation-list-left">
+                    <span className="confirmation-list-name">{item.lecturer.name}</span>
+                    <span className="confirmation-list-dept">{item.lecturer.department} · {item.assignedSections.length} course{item.assignedSections.length === 1 ? '' : 's'}</span>
+                    <div className="confirmation-list-courses">
+                      {item.assignedSections.map(sec => (
+                        <span key={getSectionKey(sec)} className="confirmation-course-chip">
+                          {sec.code}{sec.group ? ` · Grp ${sec.group}` : ''}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="confirmation-list-right">
+                    <span className={`confirmation-status-pill ${item.isConfirmed ? 'confirmed' : 'pending'}`}>
+                      {item.isConfirmed ? 'Confirmed' : 'Pending'}
+                    </span>
+                    <button
+                      className="confirm-toggle-btn"
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onToggleConfirmLecturer?.(item.lecturer.name) }}
+                    >
+                      {item.isConfirmed ? 'Revert' : 'Mark confirmed'}
+                    </button>
+                  </div>
                 </button>
-              </div>
-            </div>
-          ))}
-        </div>
+              </li>
+            ))}
+          {displayedLecturers.filter(item =>
+            item.lecturer.name.toLowerCase().includes(confirmSearch.toLowerCase()) ||
+            item.lecturer.department.toLowerCase().includes(confirmSearch.toLowerCase())
+          ).length === 0 && (
+            <li className="p-4 text-center text-xs text-[#888]">
+              No lecturers match "{confirmSearch}".
+            </li>
+          )}
+        </ul>
       </section>
       <section className="card activity-card">
         <div className="card-head">
@@ -1528,6 +1540,8 @@ function TimetablesPage({
   onReschedule,
   settings,
   lecturerUnavailability,
+  initialLecturer,
+  onJumpConsumed,
 }: {
   sessions: Session[]
   courses: Course[]
@@ -1536,9 +1550,22 @@ function TimetablesPage({
   onReschedule: (session: Session) => void
   settings: AppSettings
   lecturerUnavailability: LecturerUnavailabilityByName
+  initialLecturer?: string | null
+  onJumpConsumed?: () => void
 }) {
-  const [timetableMode, setTimetableMode] = useState<'programme' | 'lecturer' | 'classroom'>('programme')
-  const [selectedLecturer, setSelectedLecturer] = useState<string>(lecturers[0]?.name ?? 'Ama Boateng')
+  const [timetableMode, setTimetableMode] = useState<'programme' | 'lecturer' | 'classroom'>(
+    initialLecturer ? 'lecturer' : 'programme',
+  )
+  const [selectedLecturer, setSelectedLecturer] = useState<string>(
+    initialLecturer ?? lecturers[0]?.name ?? 'Ama Boateng',
+  )
+  useEffect(() => {
+    if (initialLecturer) {
+      setTimetableMode('lecturer')
+      setSelectedLecturer(initialLecturer)
+      onJumpConsumed?.()
+    }
+  }, [initialLecturer]) // eslint-disable-line react-hooks/exhaustive-deps
   const [selectedClassroom, setSelectedClassroom] = useState<string>(rooms[0]?.name ?? 'Computer Lab 1')
   const [programme, setProgramme] = useState(
     undergraduateProgrammes.find((item) =>
@@ -1555,7 +1582,6 @@ function TimetablesPage({
   const [weekStart, setWeekStart] = useState(initialWeekStart)
   const [exportingPng, setExportingPng] = useState(false)
   const [exportError, setExportError] = useState('')
-  const [isGcalModalOpen, setIsGcalModalOpen] = useState(false)
   const availableProgrammes = undergraduateProgrammes.filter((item) =>
     courses.some(
       (course) => course.programmes?.includes(item.major) || course.major === item.major,
@@ -1661,41 +1687,6 @@ function TimetablesPage({
         <div className="timetable-actions">
           <button className="button secondary" onClick={() => window.print()}>
             Print
-          </button>
-          <button
-            className="button secondary"
-            onClick={() => setIsGcalModalOpen(true)}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              borderColor: '#4285F4',
-              color: '#1a73e8',
-              fontWeight: 600,
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <rect width="24" height="24" rx="5" fill="#4285F4" />
-              <path
-                d="M5 9H19V19C19 19.5523 18.5523 20 18 20H6C5.44772 20 5 19.5523 5 19V9Z"
-                fill="#FFFFFF"
-              />
-              <path
-                d="M5 6C5 5.44772 5.44772 5 6 5H18C18.5523 5 19 5.44772 19 6V9H5V6Z"
-                fill="#1967D2"
-              />
-              <text
-                x="12"
-                y="16.5"
-                fill="#1967D2"
-                fontSize="8.5"
-                fontWeight="800"
-                textAnchor="middle"
-              >
-                31
-              </text>
-            </svg>
-            Google Calendar
           </button>
           <button className="button secondary" onClick={exportPng} disabled={exportingPng}>
             {exportingPng ? 'Preparing PNG…' : 'Export PNG'}
@@ -1870,24 +1861,9 @@ function TimetablesPage({
           </div>
         )}
         <div className="calendar-footnote">
-          Sample timetable allocations · Programme names from{' '}
-          <a href="https://acity.edu.gh/undergraduate/" target="_blank" rel="noreferrer">
-            Academic City’s official undergraduate programme list
-          </a>
-          . Click a class to inspect safe rescheduling options.
+          Timetable allocations · Academic City University, Ghana. Click any class to reschedule.
         </div>
       </section>
-
-      <GoogleCalendarModal
-        isOpen={isGcalModalOpen}
-        onClose={() => setIsGcalModalOpen(false)}
-        sessions={filtered}
-        calendarTitle={`${programme} Level ${level} Timetable`}
-        calendarSubtitle="Academic Operations & Lecture Hall Allocations"
-        feedId="master"
-        feedType="admin"
-        weekStart={weekStart}
-      />
     </>
   )
 }
@@ -2409,6 +2385,7 @@ export default function App({
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const notificationSequence = useRef(2)
   const [selectedRoom, setSelectedRoom] = useState('Computer Lab 1')
+  const [dashboardJumpLecturer, setDashboardJumpLecturer] = useState<string | null>(null)
   useEffect(() => {
     const syncExamSchedule = () => {
       try {
@@ -2716,6 +2693,10 @@ export default function App({
           }}
           onNavigate={navigateToPage}
           onReschedule={openReschedule}
+          onNavigateLecturerTimetable={(name) => {
+            setDashboardJumpLecturer(name)
+            navigateToPage('Timetables')
+          }}
         />
       )
     if (page === 'Timetables')
@@ -2728,6 +2709,8 @@ export default function App({
           onReschedule={openReschedule}
           settings={settings}
           lecturerUnavailability={lecturerUnavailability}
+          initialLecturer={dashboardJumpLecturer}
+          onJumpConsumed={() => setDashboardJumpLecturer(null)}
         />
       )
     if (page === 'Classrooms')
@@ -3146,15 +3129,15 @@ export default function App({
               </div>
             )}
             <div className="top-profile">
-              <span>{role === 'admin' ? 'NA' : role === 'lecturer' ? 'LC' : 'ST'}</span>
+              <span>{role === 'admin' ? 'AC' : role === 'lecturer' ? 'LC' : 'ST'}</span>
               <div>
-                <b>{role === 'admin' ? 'Nana Adomako' : 'Demo account'}</b>
+                <b>{role === 'admin' ? 'Academic Registry' : role === 'lecturer' ? 'Faculty Portal' : 'Student Portal'}</b>
                 <small>
                   {role === 'admin'
-                    ? 'Administrator'
+                    ? 'Academic Operations'
                     : role === 'lecturer'
-                      ? 'Lecturer preview'
-                      : 'Student preview'}
+                      ? 'Faculty Lecturer'
+                      : 'Undergraduate Student'}
                 </small>
               </div>
             </div>
@@ -3214,10 +3197,7 @@ export default function App({
             />
           )}
           <footer>
-            Demo timetable data · Academic City University, Ghana{' '}
-            <span>
-              Preview mode: <b>Changes are temporary</b>
-            </span>
+            Academic City University, Ghana · Timetabling &amp; Academic Operations System
           </footer>
         </main>
         {role === 'admin' && (
@@ -3240,7 +3220,6 @@ export default function App({
                   key={label}
                 >
                   <i className={`hgi hgi-stroke hgi-${icon}`} aria-hidden="true" />
-                  <span>{label}</span>
                   {label === 'Courses' && (
                     courses.filter(
                       (course) =>
@@ -3295,3 +3274,4 @@ export default function App({
     </div>
   )
 }
+
